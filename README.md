@@ -10,7 +10,7 @@ persona, private policy, quota logic, or domain commands.
 ```elixir
 def deps do
   [
-    {:genswarms_telegram, github: "genlayerlabs/genswarms-telegram", tag: "v0.1.3"}
+    {:genswarms_telegram, github: "genlayerlabs/genswarms-telegram", tag: "v0.1.4"}
   ]
 end
 ```
@@ -34,9 +34,11 @@ Runtime tools used by defaults:
 - `Genswarms.Telegram.Client.Curl` — default shell-native Bot API adapter. It keeps
   bot tokens out of argv by using short-lived curl config/body files.
 - `Genswarms.Telegram.Client.Fake` — deterministic test adapter.
-- `Genswarms.Telegram.Poller` — pure `getUpdates` offset/payload helpers.
-- `Genswarms.Telegram.Parser`, `Delivery`, `Format`, `ConversationId`, `Webhook` —
-  pure Telegram update, payload, formatting, id, and webhook helpers.
+- `Genswarms.Telegram.Poller` and `OffsetFile` — pure `getUpdates` offset/payload
+  helpers, including a single-file offset adapter for hosts with existing state.
+- `Genswarms.Telegram.Parser`, `Delivery`, `Buttons`, `Addressing`, `SpamGuard`,
+  `Format`, `ConversationId`, `Webhook` — pure Telegram update, payload, button,
+  addressing, spam-guard, formatting, id, and webhook helpers.
 - `Genswarms.Telegram.Store.File` and `Context.MemoryMd` — minimal local defaults
   for bot transport state and durable per-conversation `MEMORY.md`.
 - `priv/reply.sh` — agent reply helper using `GENSWARMS_TELEGRAM_CONVERSATION_ID`
@@ -64,7 +66,8 @@ eviction policy.
 
 - App: `:genswarms_telegram`
 - Modules: `Genswarms.Telegram.*`
-- Swarmidx ref: `swarmidx:acastellana/genswarms-telegram@0.1.3`
+- Swarmidx ref: `swarmidx:acastellana/genswarms-telegram@0.1.3` is published;
+  `v0.1.4` is currently available as a Git tag.
 - Sender object: `:telegram_sender`
 - Ingress object: `:telegram_ingress`
 - Agent conversation env: `GENSWARMS_TELEGRAM_CONVERSATION_ID`
