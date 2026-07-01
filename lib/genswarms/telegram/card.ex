@@ -13,12 +13,14 @@ defmodule Genswarms.Telegram.Card do
   @block_kinds ~w(heading paragraph list checklist table details quote blockquote pullquote code pre footer divider mathematical_expression anchor media collage slideshow references time map thinking)
   @inline_kinds ~w(bold italic underline strikethrough spoiler mark marked code sub subscript sup superscript link url custom_emoji date_time mention text_mention mathematical_expression math email_address email phone_number phone bank_card_number bank_card hashtag cashtag bot_command anchor anchor_link reference reference_link)
   @media_kinds ~w(photo video animation audio voice_note)
+  @button_callback_data_max_bytes 64
   @limits %{
     text_utf16_units: 4_096,
     caption_utf16_units: 1_024,
     media_group_items: %{min: 2, max: 10},
     inline_query_results: %{min: 1, max: 50},
-    callback_text_chars: %{min: 0, max: 200}
+    callback_text_chars: %{min: 0, max: 200},
+    callback_data_bytes: %{min: 1, max: @button_callback_data_max_bytes}
   }
 
   @doc "Return the package-level Telegram card capabilities."
@@ -39,29 +41,182 @@ defmodule Genswarms.Telegram.Card do
   def examples do
     [
       %{
-        name: "welcome",
+        name: "block_paragraph",
+        kind: "card_block",
         action: "send_card",
         card: %{
-          "title" => "Welcome",
+          "blocks" => [%{"kind" => "paragraph", "text" => "Plain text can stand alone."}]
+        }
+      },
+      %{
+        name: "block_heading",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [%{"kind" => "heading", "level" => 2, "text" => "Status"}]
+        }
+      },
+      %{
+        name: "block_list",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
           "blocks" => [
+            %{"kind" => "list", "ordered" => true, "items" => ["First step", "Second step"]}
+          ]
+        }
+      },
+      %{
+        name: "block_checklist",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{
+              "kind" => "checklist",
+              "items" => [
+                %{"text" => "Draft answer", "checked" => true},
+                %{"text" => "Send final", "checked" => false}
+              ]
+            }
+          ]
+        }
+      },
+      %{
+        name: "block_table",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{"kind" => "table", "headers" => ["Item", "State"], "rows" => [["Plan", "Ready"]]}
+          ]
+        }
+      },
+      %{
+        name: "block_quote",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [%{"kind" => "quote", "text" => "Use the smallest clear answer."}]
+        }
+      },
+      %{
+        name: "block_code",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [%{"kind" => "code", "language" => "elixir", "text" => "IO.puts(\"ok\")"}]
+        }
+      },
+      %{
+        name: "block_divider",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{"kind" => "paragraph", "text" => "Before"},
+            %{"kind" => "divider"},
+            %{"kind" => "paragraph", "text" => "After"}
+          ]
+        }
+      },
+      %{
+        name: "block_media",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{
+              "kind" => "media",
+              "media_type" => "photo",
+              "url" => "https://example.com/photo.jpg",
+              "caption" => "A safe HTTPS image."
+            }
+          ]
+        }
+      },
+      %{
+        name: "block_collage",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{
+              "kind" => "collage",
+              "items" => [
+                %{
+                  "kind" => "media",
+                  "media_type" => "photo",
+                  "url" => "https://example.com/a.jpg"
+                },
+                %{
+                  "kind" => "media",
+                  "media_type" => "photo",
+                  "url" => "https://example.com/b.jpg"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      %{
+        name: "block_slideshow",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{
+              "kind" => "slideshow",
+              "slides" => [
+                %{
+                  "kind" => "media",
+                  "media_type" => "photo",
+                  "url" => "https://example.com/slide-1.jpg"
+                },
+                %{
+                  "kind" => "media",
+                  "media_type" => "video",
+                  "url" => "https://example.com/slide-2.mp4"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      %{
+        name: "block_references",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{
+              "kind" => "references",
+              "items" => [%{"id" => "source-1", "text" => "Reference note"}]
+            }
+          ]
+        }
+      },
+      %{
+        name: "composed_summary",
+        kind: "composed_card",
+        action: "send_card",
+        card: %{
+          "title" => "Acme Concierge",
+          "blocks" => [
+            %{"kind" => "heading", "level" => 2, "text" => "Daily brief"},
             %{
               "kind" => "paragraph",
               "text" => [
-                "Your ",
-                %{"kind" => "bold", "text" => "Telegram agent"},
-                " instance is ready."
+                "Everything is ",
+                %{"kind" => "bold", "text" => "ready"},
+                " for review."
               ]
             },
             %{
-              "kind" => "media",
-              "media_type" => "animation",
-              "url" => "https://example.com/boot.mp4"
-            },
-            %{
-              "kind" => "details",
-              "summary" => "What can I do?",
-              "blocks" => [
-                %{"kind" => "list", "items" => ["campaigns", "drafts", "budget status"]}
+              "kind" => "checklist",
+              "items" => [
+                %{"text" => "Inputs checked", "checked" => true},
+                %{"text" => "Final sent", "checked" => false}
               ]
             }
           ],
@@ -69,162 +224,82 @@ defmodule Genswarms.Telegram.Card do
         }
       },
       %{
-        name: "operator_table",
+        name: "composed_analysis",
+        kind: "composed_card",
         action: "send_card",
         card: %{
-          "title" => "Operator Snapshot",
+          "title" => "trivia_quest",
           "blocks" => [
+            %{"kind" => "heading", "text" => "Round summary"},
             %{
               "kind" => "table",
-              "bordered" => true,
-              "striped" => true,
-              "headers" => ["identity", "runs", "spend", "state"],
-              "rows" => [["global", "42", "$0.44", "ok"]]
+              "headers" => ["Metric", "Value"],
+              "rows" => [["Questions", "5"], ["Score", "4"]]
+            },
+            %{
+              "kind" => "quote",
+              "text" => "Answer the strongest clue first.",
+              "cite" => "example_bot"
             }
+          ],
+          "footer" => [
+            %{"kind" => "link", "text" => "Rules", "url" => "https://example.com/rules"}
           ]
         }
       },
       %{
-        name: "streaming_draft",
+        name: "action_send_card",
+        kind: "action",
+        action: "send_card",
+        conversation_id: "tg:123:0",
+        card: %{
+          "title" => "Update",
+          "blocks" => [
+            %{"kind" => "paragraph", "text" => "Here is the concise answer."}
+          ]
+        }
+      },
+      %{
+        name: "action_stream_card",
+        kind: "action",
         action: "stream_card",
-        draft_id: 123,
+        conversation_id: "tg:123:0",
+        draft_id: 1,
         card: %{
           "title" => "Composing answer",
           "blocks" => [
-            %{"kind" => "thinking", "text" => "Checking campaigns..."},
+            %{"kind" => "thinking", "text" => "Checking the current context."},
             %{
               "kind" => "checklist",
               "items" => [
-                %{"text" => "identity", "checked" => true},
-                %{"text" => "router", "checked" => false}
+                %{"text" => "Read input", "checked" => true},
+                %{"text" => "Draft final", "checked" => false}
               ]
             }
           ]
         }
       },
       %{
-        name: "answer_callback",
-        action: "answer_callback",
-        callback_query_id: "cb_123",
-        text: "Done"
-      },
-      %{
-        name: "answer_inline_query",
-        action: "answer_inline_query",
-        inline_query_id: "inline_123",
-        results: [
-          %{
-            "type" => "article",
-            "id" => "status",
-            "title" => "Status",
-            "input_message_content" => %{"message_text" => "Ready"}
-          }
-        ]
-      },
-      %{
-        name: "post_story",
-        action: "post_story",
-        business_connection_id: "biz_123",
-        content: %{"type" => "photo", "photo" => "attach://story-photo"},
-        active_period: 86_400,
-        caption: "Launch"
-      },
-      %{
-        name: "chat_action",
-        action: "send_chat_action",
-        conversation_id: "tg:123:0",
-        chat_action: "typing"
-      },
-      %{
-        name: "reaction",
-        action: "set_reaction",
+        name: "action_edit_card",
+        kind: "action",
+        action: "edit_card",
         conversation_id: "tg:123:0",
         message_id: 123,
-        reaction: "👍"
-      },
-      %{
-        name: "edit_message",
-        action: "edit_message",
-        conversation_id: "tg:123:0",
-        message_id: 123,
-        text: "Updated status",
-        buttons: [[%{"text" => "Open", "url" => "https://example.com/"}]]
-      },
-      %{
-        name: "stop_poll",
-        action: "stop_poll",
-        conversation_id: "tg:123:0",
-        message_id: 124,
-        buttons: [[%{"text" => "Closed", "callback_data" => "poll_closed"}]]
-      },
-      %{
-        name: "native_checklist",
-        action: "send_checklist",
-        conversation_id: "tg:123:0",
-        business_connection_id: "biz_123",
-        title: "Launch",
-        tasks: ["Draft", %{"id" => 4, "text" => "Review"}]
-      },
-      %{
-        name: "paid_media",
-        action: "send_paid_media",
-        conversation_id: "tg:123:0",
-        star_count: 5,
-        media: [%{"type" => "photo", "media" => "file-paid-photo-id"}],
-        payload: "premium-drop-1"
-      },
-      %{
-        name: "invoice",
-        action: "send_invoice",
-        conversation_id: "tg:123:0",
-        title: "Access",
-        description: "Premium media access",
-        payload: "invoice-1",
-        currency: "XTR",
-        prices: [%{"label" => "Access", "amount" => 25}],
-        buttons: [[%{"text" => "Pay", "pay" => true}]]
-      },
-      %{
-        name: "invoice_link",
-        action: "create_invoice_link",
-        title: "Access",
-        description: "Premium media access",
-        payload: "invoice-link-1",
-        currency: "XTR",
-        prices: [%{"label" => "Access", "amount" => 25}]
-      },
-      %{
-        name: "edit_media",
-        action: "edit_media",
-        conversation_id: "tg:123:0",
-        message_id: 125,
-        media_type: "photo",
-        media: "file-photo-id"
-      },
-      %{
-        name: "copy_message",
-        action: "copy_message",
-        conversation_id: "tg:123:0",
-        from_chat_id: "@source",
-        message_id: 200
-      },
-      %{
-        name: "sticker",
-        action: "send_sticker",
-        conversation_id: "tg:123:0",
-        sticker: "file-sticker-id",
-        emoji: "👍"
-      },
-      %{
-        name: "reply_keyboard",
-        action: "send",
-        conversation_id: "tg:123:0",
-        text: "Choose",
-        reply_markup: %{
-          keyboard: [["Yes", "No"]],
-          resize_keyboard: true,
-          one_time_keyboard: true
+        card: %{
+          "title" => "Updated answer",
+          "blocks" => [%{"kind" => "paragraph", "text" => "The message has been revised."}]
         }
+      },
+      %{
+        name: "action_reply_with_quote",
+        kind: "action",
+        action: "reply",
+        conversation_id: "tg:123:0",
+        reply_to_message_id: 456,
+        quote: "specific phrase",
+        quote_position: 12,
+        quote_parse_mode: "HTML",
+        text: "Replying to that exact phrase."
       }
     ]
   end
@@ -235,15 +310,24 @@ defmodule Genswarms.Telegram.Card do
   def validate(card, opts) when is_map(card) do
     errors =
       []
-      |> validate_title(card)
+      |> validate_title(card, opts)
       |> validate_inline_fields(card, "card", [:footer])
       |> validate_blocks(blocks(card), "card.blocks", opts)
+      |> validate_buttons(get(card, :buttons), "card.buttons")
 
     if errors == [], do: :ok, else: {:error, Enum.reverse(errors)}
   end
 
   def validate(_card, _opts),
-    do: {:error, [%{path: "card", reason: "card must be an object"}]}
+    do:
+      {:error,
+       [
+         err("card", "card must be an object",
+           expected: "object",
+           got: "non-object",
+           hint: "send a JSON object with a \"blocks\" list, not a bare value"
+         )
+       ]}
 
   @doc "Render a structured card into `InputRichMessage`."
   def to_rich_message(card, opts \\ %{}) do
@@ -266,11 +350,45 @@ defmodule Genswarms.Telegram.Card do
     end
   end
 
-  defp validate_title(errors, card) do
+  defp validate_title(errors, card, opts) do
     case get(card, :title) do
-      nil -> errors
-      title when is_binary(title) -> errors
-      _ -> [err("card.title", "title must be a string") | errors]
+      nil ->
+        if required_title?(opts) do
+          [
+            err("card.title", "title is required",
+              expected: "non-empty string",
+              got: nil,
+              hint: "add a non-empty \"title\" field to this card"
+            )
+            | errors
+          ]
+        else
+          errors
+        end
+
+      title when is_binary(title) ->
+        if required_title?(opts) and blank?(title) do
+          [
+            err("card.title", "title must be non-empty",
+              expected: "non-empty string",
+              got: title,
+              hint: "replace the empty card title with visible text"
+            )
+            | errors
+          ]
+        else
+          errors
+        end
+
+      other ->
+        [
+          err("card.title", "title must be a string",
+            expected: "string",
+            got: other,
+            hint: "replace \"title\" with a plain text string"
+          )
+          | errors
+        ]
     end
   end
 
@@ -287,18 +405,18 @@ defmodule Genswarms.Telegram.Card do
 
   defp validate_block(errors, block, path, opts) when is_map(block) do
     case get(block, :kind) || get(block, :type) do
-      kind
-      when kind in [
-             "heading",
-             "paragraph",
-             "quote",
-             "pullquote",
-             "code",
-             "pre",
-             "footer",
-             "divider",
-             "time"
-           ] ->
+      kind when kind in ["heading", "paragraph", "quote", "pullquote", "footer"] ->
+        errors
+        |> validate_required_inline(block, :text, "#{path}.text")
+        |> validate_inline_fields(block, path, [:cite, :credit])
+
+      kind when kind in ["code", "pre"] ->
+        validate_required_text(errors, block, :text, "#{path}.text")
+
+      "divider" ->
+        errors
+
+      "time" ->
         validate_inline_fields(errors, block, path, [:text, :cite, :credit])
 
       kind when kind in ["mathematical_expression", "math"] ->
@@ -361,33 +479,125 @@ defmodule Genswarms.Telegram.Card do
       "thinking" ->
         if Map.get(opts, :draft?, false),
           do: errors,
-          else: [err(path, "thinking blocks are only allowed for streaming drafts") | errors]
+          else: [
+            err(path, "thinking blocks are only allowed for streaming drafts",
+              expected: "no thinking block in final cards",
+              got: "thinking",
+              hint:
+                "remove this thinking block before a final send, or validate with draft?: true while streaming"
+            )
+            | errors
+          ]
 
       nil ->
-        [err("#{path}.kind", "block kind is required") | errors]
+        [
+          err("#{path}.kind", "block kind is required",
+            expected: @block_kinds,
+            got: nil,
+            hint: "add a \"kind\" field such as \"paragraph\", \"heading\", or \"media\""
+          )
+          | errors
+        ]
 
       kind ->
-        [err("#{path}.kind", "unsupported block kind #{inspect(kind)}") | errors]
+        [
+          err("#{path}.kind", "unsupported block kind #{inspect(kind)}",
+            expected: @block_kinds,
+            got: kind,
+            hint: "replace this block kind with one of the supported card block kinds"
+          )
+          | errors
+        ]
     end
   end
 
   defp validate_block(errors, _block, path, _opts),
-    do: [err(path, "block must be an object") | errors]
+    do: [
+      err(path, "block must be an object",
+        expected: "object",
+        got: "non-object",
+        hint:
+          "replace this block with an object like %{\"kind\" => \"paragraph\", \"text\" => \"...\"}"
+      )
+      | errors
+    ]
 
   defp validate_required_list(errors, block, key, path) do
     case get(block, key) do
-      list when is_list(list) and list != [] -> errors
-      _ -> [err(path, "must be a non-empty list") | errors]
+      list when is_list(list) and list != [] ->
+        errors
+
+      other ->
+        [
+          err(path, "must be a non-empty list",
+            expected: "non-empty list",
+            got: other,
+            hint: "add at least one item to #{field_label(path)}"
+          )
+          | errors
+        ]
     end
   end
 
   defp validate_required_text(errors, block, key, path) do
     case get(block, key) do
       value when is_binary(value) ->
-        if blank?(value), do: [err(path, "must be non-empty") | errors], else: errors
+        if blank?(value) do
+          [
+            err(path, "must be non-empty",
+              expected: "non-empty string",
+              got: value,
+              hint: "add non-empty text to #{field_label(path)}"
+            )
+            | errors
+          ]
+        else
+          errors
+        end
 
-      _ ->
-        [err(path, "must be a non-empty string") | errors]
+      other ->
+        [
+          err(path, "must be a non-empty string",
+            expected: "non-empty string",
+            got: other,
+            hint: "add a non-empty string to #{field_label(path)}"
+          )
+          | errors
+        ]
+    end
+  end
+
+  defp validate_required_inline(errors, block, key, path) do
+    case get(block, key) do
+      value when is_binary(value) ->
+        if blank?(value) do
+          [
+            err(path, "must be non-empty",
+              expected: "non-empty inline text",
+              got: value,
+              hint: "add non-empty \"text\" content to this #{block_kind(block)} block"
+            )
+            | errors
+          ]
+        else
+          errors
+        end
+
+      value when is_list(value) and value != [] ->
+        validate_inline(errors, value, path)
+
+      value when is_map(value) ->
+        validate_inline(errors, value, path)
+
+      other ->
+        [
+          err(path, "must be non-empty inline text",
+            expected: "string, inline span, or non-empty list",
+            got: other,
+            hint: "add a non-empty \"text\" field to this #{block_kind(block)} block"
+          )
+          | errors
+        ]
     end
   end
 
@@ -397,10 +607,24 @@ defmodule Genswarms.Telegram.Card do
 
     cond do
       kind not in @media_kinds ->
-        [err("#{path}.media_type", "must be one of #{Enum.join(@media_kinds, ", ")}") | errors]
+        [
+          err("#{path}.media_type", "must be one of #{Enum.join(@media_kinds, ", ")}",
+            expected: @media_kinds,
+            got: kind,
+            hint: "set \"media_type\" to one of: #{Enum.join(@media_kinds, ", ")}"
+          )
+          | errors
+        ]
 
       not safe_http_url?(url) ->
-        [err("#{path}.url", "media URL must be http or https") | errors]
+        [
+          err("#{path}.url", "media URL must be http or https",
+            expected: "http or https URL",
+            got: url,
+            hint: "use an absolute http:// or https:// URL for this media block"
+          )
+          | errors
+        ]
 
       true ->
         errors
@@ -413,16 +637,44 @@ defmodule Genswarms.Telegram.Card do
 
     cond do
       is_nil(lat) ->
-        [err("#{path}.latitude", "latitude is required") | errors]
+        [
+          err("#{path}.latitude", "latitude is required",
+            expected: "number",
+            got: nil,
+            hint: "add a numeric \"latitude\" value to this map block"
+          )
+          | errors
+        ]
 
       is_nil(lon) ->
-        [err("#{path}.longitude", "longitude is required") | errors]
+        [
+          err("#{path}.longitude", "longitude is required",
+            expected: "number",
+            got: nil,
+            hint: "add a numeric \"longitude\" value to this map block"
+          )
+          | errors
+        ]
 
       not numeric?(lat) ->
-        [err("#{path}.latitude", "latitude must be numeric") | errors]
+        [
+          err("#{path}.latitude", "latitude must be numeric",
+            expected: "number",
+            got: lat,
+            hint: "replace \"latitude\" with a numeric value such as 41.3874"
+          )
+          | errors
+        ]
 
       not numeric?(lon) ->
-        [err("#{path}.longitude", "longitude must be numeric") | errors]
+        [
+          err("#{path}.longitude", "longitude must be numeric",
+            expected: "number",
+            got: lon,
+            hint: "replace \"longitude\" with a numeric value such as 2.1686"
+          )
+          | errors
+        ]
 
       true ->
         errors
@@ -439,7 +691,14 @@ defmodule Genswarms.Telegram.Card do
   end
 
   defp validate_media_items(errors, _items, path),
-    do: [err(path, "must be a non-empty list") | errors]
+    do: [
+      err(path, "must be a non-empty list",
+        expected: "non-empty list of media items",
+        got: "missing or empty",
+        hint: "add one or more media items with media_type and https URL fields"
+      )
+      | errors
+    ]
 
   defp validate_collage_content(errors, block, path, opts) do
     case get(block, :blocks) do
@@ -481,7 +740,14 @@ defmodule Genswarms.Telegram.Card do
           validate_inline(cell_acc, cell, "#{path}[#{row_idx}][#{cell_idx}]")
         end)
       else
-        [err("#{path}[#{row_idx}]", "row must be a list") | acc]
+        [
+          err("#{path}[#{row_idx}]", "row must be a list",
+            expected: "list of table cells",
+            got: row,
+            hint: "replace this table row with a list such as [\"Label\", \"Value\"]"
+          )
+          | acc
+        ]
       end
     end)
   end
@@ -504,56 +770,168 @@ defmodule Genswarms.Telegram.Card do
 
     cond do
       kind not in @inline_kinds ->
-        [err("#{path}.kind", "unsupported inline kind #{inspect(kind)}") | errors]
+        [
+          err("#{path}.kind", "unsupported inline kind #{inspect(kind)}",
+            expected: @inline_kinds,
+            got: kind,
+            hint: "replace this inline span kind with one of the supported inline kinds"
+          )
+          | errors
+        ]
 
       kind in ["link", "url"] and not safe_http_url?(get(value, :url) || get(value, :href)) ->
-        [err("#{path}.url", "inline link URL must be http or https") | errors]
+        [
+          err("#{path}.url", "inline link URL must be http or https",
+            expected: "http or https URL",
+            got: get(value, :url) || get(value, :href),
+            hint: "set this link span's \"url\" or \"href\" to an http:// or https:// URL"
+          )
+          | errors
+        ]
 
       kind == "custom_emoji" and blank?(get(value, :emoji_id) || get(value, :custom_emoji_id)) ->
-        [err("#{path}.emoji_id", "custom emoji requires emoji_id") | errors]
+        [
+          err("#{path}.emoji_id", "custom emoji requires emoji_id",
+            expected: "emoji_id",
+            got: get(value, :emoji_id) || get(value, :custom_emoji_id),
+            hint: "add the Telegram custom emoji id as \"emoji_id\""
+          )
+          | errors
+        ]
 
       kind in ["date_time"] and is_nil(get(value, :unix) || get(value, :unix_time)) ->
-        [err("#{path}.unix", "date_time requires unix") | errors]
+        [
+          err("#{path}.unix", "date_time requires unix",
+            expected: "unix timestamp",
+            got: nil,
+            hint: "add a Unix timestamp in the \"unix\" field"
+          )
+          | errors
+        ]
 
       kind == "text_mention" and is_nil(get(value, :user_id)) ->
-        [err("#{path}.user_id", "text_mention requires user_id") | errors]
+        [
+          err("#{path}.user_id", "text_mention requires user_id",
+            expected: "Telegram user id",
+            got: nil,
+            hint: "add the mentioned user's numeric Telegram id as \"user_id\""
+          )
+          | errors
+        ]
 
       kind == "mention" and is_nil(get(value, :user_id)) and blank?(get(value, :username)) ->
-        [err("#{path}.user_id", "mention requires user_id or username") | errors]
+        [
+          err("#{path}.user_id", "mention requires user_id or username",
+            expected: "user_id or username",
+            got: nil,
+            hint: "add either \"user_id\" or \"username\" to this mention span"
+          )
+          | errors
+        ]
 
       kind in ["mathematical_expression", "math"] and blank?(inline_expression(value)) ->
-        [err("#{path}.expression", "mathematical_expression requires expression") | errors]
+        [
+          err("#{path}.expression", "mathematical_expression requires expression",
+            expected: "math expression",
+            got: inline_expression(value),
+            hint: "add the formula to the \"expression\" field"
+          )
+          | errors
+        ]
 
       kind in ["email_address", "email"] and
           not valid_email?(get(value, :email_address) || get(value, :email)) ->
-        [err("#{path}.email_address", "email_address requires a valid email") | errors]
+        [
+          err("#{path}.email_address", "email_address requires a valid email",
+            expected: "email address",
+            got: get(value, :email_address) || get(value, :email),
+            hint: "set \"email_address\" or \"email\" to a valid address such as name@example.com"
+          )
+          | errors
+        ]
 
       kind in ["phone_number", "phone"] and
           blank?(get(value, :phone_number) || get(value, :phone)) ->
-        [err("#{path}.phone_number", "phone_number requires phone_number") | errors]
+        [
+          err("#{path}.phone_number", "phone_number requires phone_number",
+            expected: "phone number",
+            got: get(value, :phone_number) || get(value, :phone),
+            hint: "add the phone number to \"phone_number\" or \"phone\""
+          )
+          | errors
+        ]
 
       kind in ["bank_card_number", "bank_card"] and
           blank?(get(value, :bank_card_number) || get(value, :bank_card)) ->
-        [err("#{path}.bank_card_number", "bank_card_number requires bank_card_number") | errors]
+        [
+          err("#{path}.bank_card_number", "bank_card_number requires bank_card_number",
+            expected: "bank card number",
+            got: get(value, :bank_card_number) || get(value, :bank_card),
+            hint: "add the card number text to \"bank_card_number\" or \"bank_card\""
+          )
+          | errors
+        ]
 
       kind == "hashtag" and blank?(get(value, :hashtag) || get(value, :tag) || text) ->
-        [err("#{path}.hashtag", "hashtag requires hashtag") | errors]
+        [
+          err("#{path}.hashtag", "hashtag requires hashtag",
+            expected: "hashtag text",
+            got: get(value, :hashtag) || get(value, :tag) || text,
+            hint: "add hashtag text to \"hashtag\", \"tag\", or \"text\""
+          )
+          | errors
+        ]
 
       kind == "cashtag" and blank?(get(value, :cashtag) || get(value, :tag) || text) ->
-        [err("#{path}.cashtag", "cashtag requires cashtag") | errors]
+        [
+          err("#{path}.cashtag", "cashtag requires cashtag",
+            expected: "cashtag text",
+            got: get(value, :cashtag) || get(value, :tag) || text,
+            hint: "add cashtag text to \"cashtag\", \"tag\", or \"text\""
+          )
+          | errors
+        ]
 
       kind == "bot_command" and blank?(get(value, :bot_command) || get(value, :command) || text) ->
-        [err("#{path}.bot_command", "bot_command requires bot_command") | errors]
+        [
+          err("#{path}.bot_command", "bot_command requires bot_command",
+            expected: "bot command",
+            got: get(value, :bot_command) || get(value, :command) || text,
+            hint: "add command text to \"bot_command\", \"command\", or \"text\""
+          )
+          | errors
+        ]
 
       kind == "anchor" and blank?(get(value, :name)) ->
-        [err("#{path}.name", "anchor requires name") | errors]
+        [
+          err("#{path}.name", "anchor requires name",
+            expected: "anchor name",
+            got: get(value, :name),
+            hint: "add a non-empty \"name\" field to this anchor span"
+          )
+          | errors
+        ]
 
       kind == "anchor_link" and is_nil(get(value, :anchor_name) || get(value, :name)) ->
-        [err("#{path}.anchor_name", "anchor_link requires anchor_name") | errors]
+        [
+          err("#{path}.anchor_name", "anchor_link requires anchor_name",
+            expected: "anchor name",
+            got: get(value, :anchor_name) || get(value, :name),
+            hint: "add \"anchor_name\" that matches an anchor span or block"
+          )
+          | errors
+        ]
 
       kind in ["reference", "reference_link"] and
           blank?(get(value, :reference_name) || get(value, :name)) ->
-        [err("#{path}.reference_name", "#{kind} requires reference_name") | errors]
+        [
+          err("#{path}.reference_name", "#{kind} requires reference_name",
+            expected: "reference name",
+            got: get(value, :reference_name) || get(value, :name),
+            hint: "add \"reference_name\" that matches a references item"
+          )
+          | errors
+        ]
 
       true ->
         validate_inline(errors, text, "#{path}.text")
@@ -561,7 +939,179 @@ defmodule Genswarms.Telegram.Card do
   end
 
   defp validate_inline(errors, _value, path),
-    do: [err(path, "inline text must be a string, list, or object") | errors]
+    do: [
+      err(path, "inline text must be a string, list, or object",
+        expected: "string, list, or inline span object",
+        got: "unsupported value",
+        hint: "replace this inline value with text or a supported inline span object"
+      )
+      | errors
+    ]
+
+  defp validate_buttons(errors, nil, _path), do: errors
+
+  defp validate_buttons(errors, buttons, path) when is_list(buttons) do
+    buttons
+    |> Enum.with_index()
+    |> Enum.reduce(errors, fn {row, row_idx}, acc ->
+      row_buttons = if is_list(row), do: row, else: [row]
+
+      row_buttons
+      |> Enum.with_index()
+      |> Enum.reduce(acc, fn {button, button_idx}, button_acc ->
+        validate_button(button_acc, button, "#{path}[#{row_idx}][#{button_idx}]")
+      end)
+    end)
+  end
+
+  defp validate_buttons(errors, buttons, path) do
+    [
+      err(path, "buttons must be a list",
+        expected: "list of button rows",
+        got: buttons,
+        hint:
+          "make \"buttons\" a list of rows, for example [[%{\"text\" => \"Open\", \"url\" => \"https://example.com\"}]]"
+      )
+      | errors
+    ]
+  end
+
+  defp validate_button(errors, button, path) when is_map(button) do
+    errors
+    |> validate_button_text(button, path)
+    |> validate_button_url(button, path)
+    |> validate_button_callback_data(button, path)
+    |> validate_button_web_app(button, path)
+  end
+
+  defp validate_button(errors, button, path) do
+    [
+      err(path, "button must be an object",
+        expected: "button object",
+        got: button,
+        hint:
+          "replace this button with an object containing at least \"text\" and one action field"
+      )
+      | errors
+    ]
+  end
+
+  defp validate_button_text(errors, button, path) do
+    case get(button, :text) do
+      text when is_binary(text) ->
+        if blank?(text) do
+          [
+            err("#{path}.text", "button text must be non-empty",
+              expected: "non-empty string",
+              got: text,
+              hint: "add visible text to this button"
+            )
+            | errors
+          ]
+        else
+          errors
+        end
+
+      other ->
+        [
+          err("#{path}.text", "button text must be non-empty",
+            expected: "non-empty string",
+            got: other,
+            hint: "add a non-empty \"text\" field to this button"
+          )
+          | errors
+        ]
+    end
+  end
+
+  defp validate_button_url(errors, button, path) do
+    case get(button, :url) do
+      nil ->
+        errors
+
+      url ->
+        if safe_http_url?(url) do
+          errors
+        else
+          [
+            err("#{path}.url", "button URL must be http or https",
+              expected: "http or https URL",
+              got: url,
+              hint: "set this button URL to an absolute http:// or https:// URL"
+            )
+            | errors
+          ]
+        end
+    end
+  end
+
+  defp validate_button_callback_data(errors, button, path) do
+    case get(button, :callback_data) || get(button, :action) do
+      nil ->
+        errors
+
+      data when is_binary(data) and byte_size(data) in 1..@button_callback_data_max_bytes ->
+        errors
+
+      data ->
+        [
+          err("#{path}.callback_data", "callback_data must be 1 to 64 bytes",
+            expected: "1 to 64 bytes",
+            got: data,
+            hint: "shorten this callback_data to 64 bytes or fewer"
+          )
+          | errors
+        ]
+    end
+  end
+
+  defp validate_button_web_app(errors, button, path) do
+    case get(button, :web_app) do
+      nil ->
+        errors
+
+      url when is_binary(url) ->
+        if safe_http_url?(url) do
+          errors
+        else
+          [
+            err("#{path}.web_app.url", "web_app URL must be http or https",
+              expected: "http or https URL",
+              got: url,
+              hint: "set this Web App URL to an absolute http:// or https:// URL"
+            )
+            | errors
+          ]
+        end
+
+      web_app when is_map(web_app) ->
+        url = get(web_app, :url)
+
+        if safe_http_url?(url) do
+          errors
+        else
+          [
+            err("#{path}.web_app.url", "web_app URL must be http or https",
+              expected: "http or https URL",
+              got: url,
+              hint: "set this Web App URL to an absolute http:// or https:// URL"
+            )
+            | errors
+          ]
+        end
+
+      other ->
+        [
+          err("#{path}.web_app", "web_app must be a URL or object with url",
+            expected: "URL string or %{url: URL}",
+            got: other,
+            hint:
+              "replace web_app with an https URL or an object like %{\"url\" => \"https://example.com/app\"}"
+          )
+          | errors
+        ]
+    end
+  end
 
   defp render_title(card) do
     case get(card, :title) do
@@ -955,9 +1505,26 @@ defmodule Genswarms.Telegram.Card do
 
   defp get(map, key) when is_map(map), do: Map.get(map, key) || Map.get(map, to_string(key))
 
+  defp required_title?(opts) when is_map(opts),
+    do: Map.get(opts, :require_title?, false) or Map.get(opts, :title_required?, false)
+
+  defp required_title?(opts) when is_list(opts),
+    do: Keyword.get(opts, :require_title?, false) or Keyword.get(opts, :title_required?, false)
+
+  defp required_title?(_opts), do: false
+
   defp truthy?(value), do: value in [true, "true", 1, "1"]
 
   defp blank?(value), do: is_nil(value) or String.trim(to_string(value)) == ""
+
+  defp block_kind(block), do: get(block, :kind) || get(block, :type) || "card"
+
+  defp field_label(path) do
+    path
+    |> String.split(".")
+    |> List.last()
+    |> String.replace(~r/\[\d+\]/, "")
+  end
 
   defp inline_expression(value), do: get(value, :expression) || get(value, :text)
 
@@ -995,5 +1562,23 @@ defmodule Genswarms.Telegram.Card do
   end
 
   defp escape_attr(text), do: escape(text) |> String.replace("\"", "&quot;")
-  defp err(path, reason), do: %{path: path, reason: reason}
+
+  defp err(path, reason, opts \\ []) do
+    hint = Keyword.get(opts, :hint) || default_hint(path, reason)
+
+    %{path: path, reason: reason, hint: hint}
+    |> maybe_put_error(:expected, opts)
+    |> maybe_put_error(:got, opts)
+  end
+
+  defp maybe_put_error(error, key, opts) do
+    if Keyword.has_key?(opts, key) do
+      Map.put(error, key, Keyword.get(opts, key))
+    else
+      error
+    end
+  end
+
+  defp default_hint(path, reason),
+    do: "fix #{path} so it satisfies this rule: #{reason}"
 end

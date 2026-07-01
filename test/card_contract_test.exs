@@ -74,6 +74,38 @@ defmodule Genswarms.Telegram.CardContractTest do
     end
   end
 
+  test "card validation errors teach agents how to repair malformed cards" do
+    broken_cards = [
+      {Card.validate(%{"blocks" => []}, %{require_title?: true}), "missing required title"},
+      {Card.validate(%{"blocks" => [%{"kind" => "paragraph", "text" => ""}]}),
+       "empty paragraph text"},
+      {Card.validate(%{"blocks" => [%{"kind" => "unknown"}]}), "bad block kind"},
+      {Card.validate(%{
+         "blocks" => [%{"kind" => "paragraph", "text" => "Choose"}],
+         "buttons" => [
+           [%{"text" => "Run", "callback_data" => String.duplicate("x", 65)}]
+         ]
+       }), "oversized callback data"},
+      {Card.validate(%{
+         "blocks" => [
+           %{"kind" => "media", "media_type" => "photo", "url" => "file:///tmp/a.jpg"}
+         ]
+       }), "non-http media URL"},
+      {Card.validate(%{"blocks" => [%{"kind" => "thinking", "text" => "Working"}]}),
+       "thinking block in final card"}
+    ]
+
+    for {{:error, errors}, label} <- broken_cards do
+      assert errors != [], label
+
+      assert Enum.all?(errors, fn error ->
+               is_binary(error[:path]) and error[:path] != "" and
+                 is_binary(error[:hint]) and error[:hint] != ""
+             end),
+             label
+    end
+  end
+
   test "card rendering covers rich block types and inline entities without leaking unsafe text" do
     card = %{
       "title" => "Ops <Status>",
@@ -277,11 +309,66 @@ defmodule Genswarms.Telegram.CardContractTest do
   test "card examples remain valid agent-facing payloads" do
     assert length(Card.examples()) > 0
 
-    for %{} = example <- Card.examples(),
-        card = Map.get(example, :card) || Map.get(example, "card"),
-        not is_nil(card) do
-      opts = if example[:action] in ["stream_card"], do: %{draft?: true}, else: %{}
-      assert :ok = Card.validate(card, opts)
+    for %{} = example <- Card.examples() do
+      case {Map.get(example, :action), Map.get(example, :card) || Map.get(example, "card")} do
+        {action, card} when is_map(card) ->
+          opts = if action in ["stream_card"], do: %{draft?: true}, else: %{}
+          assert :ok = Card.validate(card, opts)
+          assert {:ok, _rich_message} = Card.to_rich_message(card, opts)
+
+        {"reply", nil} ->
+          :ok
+      end
+    end
+  end
+
+  test "card examples are product neutral" do
+    examples = inspect(Card.examples())
+
+    for disallowed <- [
+          "Wing" <> "ston",
+          "wing" <> "ston",
+          "Ra" <> "lly",
+          "ra" <> "lly",
+          "Sub" <> "Zero"
+        ] do
+      refute examples =~ disallowed
+    end
+  end
+
+  test "agent guide is flat and product neutral" do
+    guide_dir = Path.expand("../priv/agent-guide", __DIR__)
+
+    assert guide_dir
+           |> File.ls!()
+           |> Enum.sort() == [
+             "INDEX.md",
+             "blocks.md",
+             "cards.md",
+             "media.md",
+             "quotes.md",
+             "spans.md",
+             "streaming.md"
+           ]
+
+    guide_text =
+      guide_dir
+      |> File.ls!()
+      |> Enum.map(fn file ->
+        path = Path.join(guide_dir, file)
+        refute File.dir?(path)
+        File.read!(path)
+      end)
+      |> Enum.join("\n")
+
+    for disallowed <- [
+          "Wing" <> "ston",
+          "wing" <> "ston",
+          "Ra" <> "lly",
+          "ra" <> "lly",
+          "Sub" <> "Zero"
+        ] do
+      refute guide_text =~ disallowed
     end
   end
 end
