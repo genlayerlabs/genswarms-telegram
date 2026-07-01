@@ -1,0 +1,13 @@
+{
+  "registry": {
+    "scope": "acastellana"
+  },
+  "packages": [
+    {
+      "name": "genswarms-telegram",
+      "dir": "package",
+      "kind": "handler",
+      "description": "Reusable Telegram transport and GenSwarms object handlers"
+    }
+  ]
+}
