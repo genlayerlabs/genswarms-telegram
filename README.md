@@ -73,8 +73,8 @@ eviction policy.
 
 - App: `:genswarms_telegram`
 - Modules: `Genswarms.Telegram.*`
-- Swarmidx ref: `swarmidx:acastellana/genswarms-telegram@0.1.3` is published;
-  `v0.1.5` is the current package version.
+- Swarmidx ref: `swarmidx:acastellana/genswarms-telegram@0.1.5` is published;
+  `v0.1.5` is the current package Git tag.
 - Sender object: `:telegram_sender`
 - Ingress object: `:telegram_ingress`
 - Agent conversation env: `GENSWARMS_TELEGRAM_CONVERSATION_ID`
