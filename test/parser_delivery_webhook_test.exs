@@ -31,6 +31,7 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
 
     assert {:ok, %{type: :callback, callback_query_id: "cb1", chat_type: "private"}} =
              Parser.parse_update(callback)
+
     assert :ignore = Parser.parse_update(%{"edited_message" => update["message"]})
 
     channel_post = %{
@@ -77,6 +78,47 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
     assert payload.reply_parameters == %{message_id: 9, allow_sending_without_reply: true}
     assert payload.reply_markup.inline_keyboard == [[%{text: "Open", url: "https://example.com"}]]
 
+    keyboard_payload =
+      Delivery.build_send_message(%{
+        conversation_id: "tg:123:0",
+        text: "choose",
+        reply_markup: %{
+          keyboard: [
+            [%{text: "Yes"}, %{text: "Location", request_location: true}],
+            [%{text: "App", web_app: %{url: "https://example.com/app"}}]
+          ],
+          resize_keyboard: true,
+          input_field_placeholder: "Choose"
+        }
+      })
+
+    assert keyboard_payload.reply_markup == %{
+             keyboard: [
+               [%{text: "Yes"}, %{text: "Location", request_location: true}],
+               [%{text: "App", web_app: %{url: "https://example.com/app"}}]
+             ],
+             resize_keyboard: true,
+             input_field_placeholder: "Choose"
+           }
+
+    remove_payload =
+      Delivery.build_send_message(%{
+        conversation_id: "tg:123:0",
+        text: "done",
+        reply_markup: %{remove_keyboard: true}
+      })
+
+    assert remove_payload.reply_markup == %{remove_keyboard: true}
+
+    force_payload =
+      Delivery.build_send_message(%{
+        conversation_id: "tg:123:0",
+        text: "reply",
+        reply_markup: %{force_reply: true, input_field_placeholder: "Reply"}
+      })
+
+    assert force_payload.reply_markup == %{force_reply: true, input_field_placeholder: "Reply"}
+
     invalid_reply =
       Delivery.build_send_message(%{
         conversation_id: "tg:123:0",
@@ -96,6 +138,12 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
 
     assert_raise ArgumentError, fn ->
       Delivery.reply_markup([%{text: "Too long", callback_data: String.duplicate("x", 65)}])
+    end
+
+    assert_raise ArgumentError, fn ->
+      Delivery.reply_markup(%{
+        keyboard: [[%{text: "Bad", web_app: %{url: "javascript:alert(1)"}}]]
+      })
     end
 
     assert ["aa", "a"] = Delivery.chunk_text("aaa", 2)

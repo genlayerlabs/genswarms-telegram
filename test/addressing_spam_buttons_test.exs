@@ -64,25 +64,113 @@ defmodule Genswarms.Telegram.AddressingSpamButtonsTest do
         [%{"text" => "Open", "url" => "https://example.com"}],
         [%{"text" => "Quiet", "action" => "mode quiet"}],
         [%{text: "Callback", callback_data: "cb"}],
+        [%{"text" => "App", "web_app" => %{"url" => "https://example.com/app"}}],
+        [%{"text" => "Inline", "switch_inline_query" => "query"}],
+        [%{"text" => "Inline Here", "switch_inline_query_current_chat" => "here"}],
+        [
+          %{
+            "text" => "Choose",
+            "switch_inline_query_chosen_chat" => %{
+              "query" => "pick",
+              "allow_user_chats" => true
+            }
+          }
+        ],
+        [%{"text" => "Copy", "copy_text" => %{"text" => "copy me"}}],
+        [%{"text" => "Pay", "pay" => true}],
         [%{"text" => ""}, %{"text" => "Bad", "url" => "javascript:alert(1)"}],
-        [%{"text" => "Long", "action" => String.duplicate("a", 65)}]
+        [%{"text" => "Bad App", "web_app" => %{"url" => "javascript:alert(1)"}}],
+        [%{"text" => "Long", "action" => String.duplicate("a", 65)}],
+        [%{"text" => "Long Copy", "copy_text" => String.duplicate("a", 257)}]
       ])
 
     assert rows == [
              [%{text: "Open", url: "https://example.com"}],
              [%{text: "Quiet", callback_data: "mode quiet"}],
-             [%{text: "Callback", callback_data: "cb"}]
+             [%{text: "Callback", callback_data: "cb"}],
+             [%{text: "App", web_app: %{url: "https://example.com/app"}}],
+             [%{text: "Inline", switch_inline_query: "query"}],
+             [%{text: "Inline Here", switch_inline_query_current_chat: "here"}],
+             [
+               %{
+                 text: "Choose",
+                 switch_inline_query_chosen_chat: %{query: "pick", allow_user_chats: true}
+               }
+             ],
+             [%{text: "Copy", copy_text: %{text: "copy me"}}],
+             [%{text: "Pay", pay: true}]
            ]
 
     assert Buttons.reply_markup(rows) == %{
              inline_keyboard: [
                [%{text: "Open", url: "https://example.com"}],
                [%{text: "Quiet", callback_data: "mode quiet"}],
-               [%{text: "Callback", callback_data: "cb"}]
+               [%{text: "Callback", callback_data: "cb"}],
+               [%{text: "App", web_app: %{url: "https://example.com/app"}}],
+               [%{text: "Inline", switch_inline_query: "query"}],
+               [%{text: "Inline Here", switch_inline_query_current_chat: "here"}],
+               [
+                 %{
+                   text: "Choose",
+                   switch_inline_query_chosen_chat: %{query: "pick", allow_user_chats: true}
+                 }
+               ],
+               [%{text: "Copy", copy_text: %{text: "copy me"}}],
+               [%{text: "Pay", pay: true}]
              ]
            }
 
     assert Buttons.normalize([[%{"text" => "", "url" => "https://example.com"}]]) == nil
+  end
+
+  test "buttons normalize full reply markup shapes" do
+    assert Buttons.normalize_reply_markup(%{
+             "keyboard" => [
+               ["Yes", "No"],
+               [
+                 %{"text" => "Share location", "request_location" => true},
+                 %{"text" => "Open app", "web_app" => %{"url" => "https://example.com/app"}}
+               ],
+               [%{"text" => "Quiz", "request_poll" => %{"type" => "quiz"}}],
+               [%{"text" => "Styled", "style" => "primary", "icon_custom_emoji_id" => "123"}],
+               [
+                 %{"text" => "Bad", "request_location" => true, "request_contact" => true},
+                 %{"text" => "Bad app", "web_app" => %{"url" => "javascript:alert(1)"}}
+               ]
+             ],
+             "resize_keyboard" => true,
+             "one_time_keyboard" => true,
+             "input_field_placeholder" => "Choose"
+           }) == %{
+             keyboard: [
+               [%{text: "Yes"}, %{text: "No"}],
+               [
+                 %{text: "Share location", request_location: true},
+                 %{text: "Open app", web_app: %{url: "https://example.com/app"}}
+               ],
+               [%{text: "Quiz", request_poll: %{type: "quiz"}}],
+               [%{text: "Styled", style: "primary", icon_custom_emoji_id: "123"}]
+             ],
+             resize_keyboard: true,
+             one_time_keyboard: true,
+             input_field_placeholder: "Choose"
+           }
+
+    assert Buttons.normalize_reply_markup(%{"remove_keyboard" => true, "selective" => true}) ==
+             %{remove_keyboard: true, selective: true}
+
+    assert Buttons.normalize_reply_markup(%{
+             "force_reply" => true,
+             "input_field_placeholder" => "Reply"
+           }) ==
+             %{force_reply: true, input_field_placeholder: "Reply"}
+
+    assert Buttons.normalize_reply_markup(%{
+             "inline_keyboard" => [[%{"text" => "Open", "url" => "https://example.com"}]]
+           }) ==
+             %{inline_keyboard: [[%{text: "Open", url: "https://example.com"}]]}
+
+    assert Buttons.normalize_reply_markup(%{"keyboard" => [[%{"text" => ""}]]}) == nil
   end
 
   test "offset file helper hashes tokens and reads malformed files as zero" do
