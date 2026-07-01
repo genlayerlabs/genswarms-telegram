@@ -1,0 +1,13 @@
+{
+  "registry": {
+    "scope": "genlayerlabs"
+  },
+  "packages": [
+    {
+      "name": "genswarms-telegram",
+      "dir": ".",
+      "kind": "handler",
+      "description": "Reusable Telegram transport and GenSwarms object handlers"
+    }
+  ]
+}
