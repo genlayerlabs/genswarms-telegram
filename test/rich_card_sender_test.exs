@@ -180,9 +180,36 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     catalog = Capabilities.catalog()
     interface = Sender.interface()
 
+    agent_actions =
+      Actions.groups()
+      |> Enum.filter(fn group ->
+        case Actions.actions_in(group) do
+          [action | _] -> Actions.classify(action) == {:agent, group}
+          [] -> false
+        end
+      end)
+      |> Enum.flat_map(&Actions.actions_in/1)
+
+    operator_groups =
+      Actions.groups()
+      |> Enum.filter(fn group ->
+        case Actions.actions_in(group) do
+          [action | _] -> Actions.classify(action) == {:operator, group}
+          [] -> false
+        end
+      end)
+
     assert "send_card" in sender.actions
     assert "send_contact" in sender.actions
     assert "send_media_group" in sender.actions
+    assert catalog.implemented_agent_safe == agent_actions
+    refute "send_gift" in catalog.implemented_agent_safe
+    assert Map.keys(catalog.prepared_restricted) |> Enum.sort() == Enum.sort(operator_groups)
+
+    for group <- operator_groups do
+      assert Map.fetch!(catalog.prepared_restricted, group) == Actions.actions_in(group)
+    end
+
     assert Actions.classify("send_gift") == {:operator, :gifts}
     assert Actions.classify("get_my_star_balance") == {:operator, :payments}
     assert Actions.classify("verify_user") == {:operator, :verification}

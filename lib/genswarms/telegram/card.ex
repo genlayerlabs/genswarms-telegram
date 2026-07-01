@@ -9,11 +9,31 @@ defmodule Genswarms.Telegram.Card do
 
   alias Genswarms.Telegram.{Capabilities, RichMessage}
 
+  @schema_version "1"
+  @block_kinds ~w(heading paragraph list checklist table details quote blockquote pullquote code pre footer divider mathematical_expression anchor media collage slideshow references time map thinking)
   @inline_kinds ~w(bold italic underline strikethrough spoiler mark marked code sub subscript sup superscript link url custom_emoji date_time mention text_mention mathematical_expression math email_address email phone_number phone bank_card_number bank_card hashtag cashtag bot_command anchor anchor_link reference reference_link)
   @media_kinds ~w(photo video animation audio voice_note)
+  @limits %{
+    text_utf16_units: 4_096,
+    caption_utf16_units: 1_024,
+    media_group_items: %{min: 2, max: 10},
+    inline_query_results: %{min: 1, max: 50},
+    callback_text_chars: %{min: 0, max: 200}
+  }
 
   @doc "Return the package-level Telegram card capabilities."
   def capabilities, do: Capabilities.sender()
+
+  @doc "Return the structured-card schema version, supported kinds, and package limits."
+  def schema_info do
+    %{
+      version: @schema_version,
+      blocks: @block_kinds,
+      inline: @inline_kinds,
+      media: @media_kinds,
+      limits: @limits
+    }
+  end
 
   @doc "Machine-readable examples for agents."
   def examples do

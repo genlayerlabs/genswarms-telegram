@@ -15,6 +15,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
     Buttons,
     Card,
     Client,
+    Capabilities,
     ConversationId,
     Delivery,
     RichMessage
@@ -318,11 +319,11 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp authorize_agent_action(from, action, group, msg, state, caller) do
     cond do
-      not agent_group_enabled?(state.agent_surface, group) ->
-        {:error, :unauthorized_action}
-
       delete_action?(action) and operator_granted?(from, :message_ops, state) ->
         {:ok, %{class: :operator, group: :message_ops, caller: caller.kind}}
+
+      not agent_group_enabled?(state.agent_surface, group) ->
+        {:error, :unauthorized_action}
 
       targetless_agent_action?(action, group) ->
         {:ok, %{class: :agent, group: group, caller: caller.kind}}
@@ -452,8 +453,8 @@ defmodule Genswarms.Telegram.Objects.Sender do
   defp dispatch_authorized(from, %{"action" => "send"} = msg, state),
     do: send_text(from, msg, state, :proactive)
 
-  defp dispatch_authorized(_from, %{"action" => "capabilities"}, state),
-    do: {:reply, %{ok: true, capabilities: Card.capabilities()}, state}
+  defp dispatch_authorized(from, %{"action" => "capabilities"}, state),
+    do: {:reply, %{ok: true, capabilities: capabilities_for(from, state)}, state}
 
   defp dispatch_authorized(_from, %{"action" => "examples"}, state),
     do: {:reply, %{ok: true, examples: Card.examples()}, state}
@@ -3270,10 +3271,73 @@ defmodule Genswarms.Telegram.Objects.Sender do
     end)
   end
 
+  defp agent_group_enabled?(_surface, :discovery), do: true
   defp agent_group_enabled?(surface, group), do: MapSet.member?(surface, group)
 
   defp operator_granted?(from, group, state) do
     from in Map.get(state.action_grants, group, [])
+  end
+
+  defp capabilities_for(from, state) do
+    caller = caller_scope(from, state)
+
+    from
+    |> capability_group_actions(state, caller)
+    |> Capabilities.for_action_groups()
+  end
+
+  defp capability_group_actions(from, state, %{kind: :bound_slot}) do
+    state.agent_surface
+    |> MapSet.put(:discovery)
+    |> Map.new(&{&1, Actions.actions_in(&1)})
+    |> merge_capability_groups(operator_capability_groups(from, state))
+  end
+
+  defp capability_group_actions(from, state, %{kind: kind})
+       when kind in [:named_object, :internal] do
+    named_agent_capability_groups(from, state)
+    |> merge_capability_groups(operator_capability_groups(from, state))
+  end
+
+  defp capability_group_actions(_from, _state, _caller), do: %{}
+
+  defp named_agent_capability_groups(from, state) do
+    state.agent_surface
+    |> MapSet.put(:discovery)
+    |> Enum.reduce(%{}, fn group, acc ->
+      actions =
+        group
+        |> Actions.actions_in()
+        |> Enum.filter(&named_agent_capability_action?(&1, group, from, state))
+
+      if actions == [], do: acc, else: Map.put(acc, group, actions)
+    end)
+  end
+
+  defp named_agent_capability_action?(_action, :discovery, _from, _state), do: true
+
+  defp named_agent_capability_action?("progress", _group, from, state) do
+    from in state.progress_sources
+  end
+
+  defp named_agent_capability_action?(action, group, from, state) do
+    cond do
+      targetless_agent_action?(action, group) -> true
+      delete_action?(action) -> operator_granted?(from, :message_ops, state)
+      true -> from in state.send_sources
+    end
+  end
+
+  defp operator_capability_groups(from, state) do
+    state.action_grants
+    |> Enum.filter(fn {_group, sources} -> from in sources end)
+    |> Map.new(fn {group, _sources} -> {group, Actions.actions_in(group)} end)
+  end
+
+  defp merge_capability_groups(left, right) do
+    Map.merge(left, right, fn _group, left_actions, right_actions ->
+      Enum.uniq(left_actions ++ right_actions)
+    end)
   end
 
   defp caller_scope(from, state) do
@@ -3310,7 +3374,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         end
 
       :skip ->
-        :ok
+        {:error, :unauthorized_message}
     end
   end
 

@@ -138,6 +138,21 @@ defmodule Genswarms.Telegram.SenderActionGateTest do
     )
   end
 
+  test "bound own-message actions require a resolvable message id" do
+    {fake, state} = bound_state()
+
+    for action <- Actions.actions_in(:own_messages) do
+      payload = Map.drop(payload_for(action), ["message_id", "message_ids"])
+
+      assert_denied(
+        Sender.handle_message(@bound_slot, payload, state),
+        ":unauthorized_message"
+      )
+    end
+
+    assert Fake.calls(fake) == []
+  end
+
   test "audit is scoped to audit_sources" do
     {_fake, state} = fresh_state(audit_sources: [:auditor])
 
@@ -178,6 +193,41 @@ defmodule Genswarms.Telegram.SenderActionGateTest do
 
       assert gate_allowed?(result) == expected_allowed?(action, caller_class),
              "unexpected gate decision for #{inspect(action)} from #{inspect(caller_class)}"
+    end
+  end
+
+  test "capabilities list exactly the actions allowed by the gate for representative callers" do
+    {_fake, state} =
+      bound_state(
+        agent_surface: [:core],
+        send_sources: [:named],
+        progress_sources: [:named],
+        action_grants: %{message_ops: [:named]}
+      )
+
+    callers = [
+      bound_slot: @bound_slot,
+      named_object_granted_message_ops: :named,
+      ungranted_named_object: :observer
+    ]
+
+    for {caller_class, caller} <- callers do
+      {:reply, body, _state} =
+        Sender.handle_message(caller, %{"action" => "capabilities"}, state)
+
+      capabilities = Jason.decode!(body)["capabilities"]
+      listed = listed_capability_actions(capabilities)
+
+      assert capabilities["telegram_bot_api_version"] == "10.1"
+      assert is_map(capabilities["card_schema"]["limits"])
+      assert is_binary(capabilities["card_schema"]["version"])
+
+      for action <- Actions.actions() do
+        result = Sender.handle_message(caller, payload_for(action), state)
+
+        assert gate_allowed?(result) == MapSet.member?(listed, action),
+               "capabilities drift for #{inspect(action)} from #{inspect(caller_class)}"
+      end
     end
   end
 
@@ -223,6 +273,13 @@ defmodule Genswarms.Telegram.SenderActionGateTest do
       _reply ->
         true
     end
+  end
+
+  defp listed_capability_actions(%{"groups" => groups}) do
+    groups
+    |> Map.values()
+    |> List.flatten()
+    |> MapSet.new()
   end
 
   defp expected_allowed?(action, :unbound_slot) do
