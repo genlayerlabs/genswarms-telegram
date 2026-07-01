@@ -1,7 +1,14 @@
 defmodule Genswarms.Telegram.ConversationIdFormatTest do
   use ExUnit.Case, async: true
 
-  alias Genswarms.Telegram.{BotRef, Buttons, CommandRouter.Basic, ConversationId, Format, RichMessage}
+  alias Genswarms.Telegram.{
+    BotRef,
+    Buttons,
+    CommandRouter.Basic,
+    ConversationId,
+    Format,
+    RichMessage
+  }
 
   test "package exposes a stable semantic version" do
     assert Genswarms.Telegram.version() == "0.1.7"
@@ -52,7 +59,10 @@ defmodule Genswarms.Telegram.ConversationIdFormatTest do
     assert Format.to_html("*italic* _also_") == "<i>italic</i> <i>also</i>"
     assert Format.to_html("**unterminated") == "**unterminated"
     assert Format.to_html("`unterminated") == "`unterminated"
-    assert Format.to_html("[broken](https://example.com/a b)") == "[broken](https://example.com/a b)"
+
+    assert Format.to_html("[broken](https://example.com/a b)") ==
+             "[broken](https://example.com/a b)"
+
     assert Format.to_html("[quote](https://example.com/?q=\"x\")") ==
              "<a href=\"https://example.com/?q=&quot;x&quot;\">quote</a>"
 
@@ -78,7 +88,12 @@ defmodule Genswarms.Telegram.ConversationIdFormatTest do
       [%{"text" => "Callback", "action" => "go"}],
       [%{"text" => "App", "web_app" => "https://example.com/app"}],
       [%{"text" => "Search", "switch_inline_query" => "wingston"}],
-      [%{"text" => "Chosen", "switch_inline_query_chosen_chat" => %{"allow_user_chats" => "true"}}],
+      [
+        %{
+          "text" => "Chosen",
+          "switch_inline_query_chosen_chat" => %{"allow_user_chats" => "true"}
+        }
+      ],
       [%{"text" => "Copy", "copy_text" => %{"text" => "copied"}}],
       [%{"text" => "Pay", "pay" => "1"}],
       [%{"text" => ""}]
@@ -107,6 +122,7 @@ defmodule Genswarms.Telegram.ConversationIdFormatTest do
     assert Buttons.normalize_reply_markup(%{"inline_keyboard" => [[%{"text" => ""}]]}) == nil
     assert Buttons.normalize_reply_markup(%{"keyboard" => "bad"}) == nil
     assert Buttons.normalize_reply_markup(%{"keyboard" => [[123]]}) == nil
+
     assert Buttons.normalize([%{"text" => "single", "callback_data" => "ok"}]) == [
              [%{text: "single", callback_data: "ok"}]
            ]
@@ -185,10 +201,14 @@ defmodule Genswarms.Telegram.ConversationIdFormatTest do
 
   test "basic command router strips bot names and fails closed on non-command input" do
     assert Basic.handle_command(%{text: "/start@WingstonBot hello"}, %{}) == {:reply, "Started."}
-    assert Basic.handle_command(%{text: "   /help"}, %{}) == {:reply, "Send a message and I will route it to the swarm."}
+
+    assert Basic.handle_command(%{text: "   /help"}, %{}) ==
+             {:reply, "Send a message and I will route it to the swarm."}
+
     assert Basic.handle_command(%{text: "hello"}, %{}) == {:reply, "Unknown command."}
     assert Basic.handle_command(%{text: nil}, %{}) == {:reply, "Unknown command."}
     assert Basic.handle_callback(%{}, %{}) == :ok
+
     assert Basic.command_menu(:dm, %{}) == [
              %{command: "start", description: "Start"},
              %{command: "help", description: "Help"}

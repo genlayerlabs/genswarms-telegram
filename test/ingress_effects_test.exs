@@ -213,6 +213,52 @@ defmodule Genswarms.Telegram.IngressEffectsTest do
     assert FileStore.read_offset(crashed.bot_ref) == 0
   end
 
+  test "text updates create/bind/deliver a session once and dedupe repeated update ids", %{
+    fake: fake
+  } do
+    Process.put(:ingress_runtime_parent, self())
+
+    state =
+      Ingress.new(%{
+        client: Fake,
+        client_opts: [fake: fake],
+        store: FileStore,
+        bot_ref: "bot-runtime",
+        inbound_effects: {Effects, %{mode: :cont, parent: self()}},
+        fail_open_without_username?: true,
+        binding_authority: :custom_ingress,
+        binding_sinks: [:telegram_sender, :audit_sink],
+        session_runtime: __MODULE__.Runtime,
+        session_opts: %{workspace_root: "/tmp/unused"}
+      })
+
+    update = Map.put(text_update("hello runtime"), "update_id", 101)
+
+    {:reply, body, state} =
+      Ingress.handle_message(:tester, %{"action" => "inject_update", "update" => update}, state)
+
+    assert Jason.decode!(body)["routed"] == true
+    assert_receive {:runtime_ensure, "tg:123:0", opts}
+    assert opts.binding_authority == :custom_ingress
+    assert opts.binding_sinks == [:telegram_sender, :audit_sink]
+    assert_receive {:runtime_bind, "tg:123:0", [:telegram_sender, :audit_sink]}
+
+    assert_receive {:runtime_deliver, %{slot: :runtime_slot}, "hello runtime", deliver_opts}
+    assert deliver_opts.bot_ref == "bot-runtime"
+    assert_receive {:after_routed, "tg:123:0", :session}
+
+    assert [%{event: %{conversation_id: "tg:123:0"}, session: %{slot: :runtime_slot}}] =
+             state.routed
+
+    {:reply, body, state} =
+      Ingress.handle_message(:tester, %{"action" => "inject_update", "update" => update}, state)
+
+    assert Jason.decode!(body)["duplicate"] == true
+    assert state.routed |> length() == 1
+  after
+    Process.delete(:ingress_runtime_parent)
+  end
+
   test "status, interface, malformed messages, ignored updates, and unknown actions are stable",
        %{
          fake: fake
@@ -258,6 +304,31 @@ defmodule Genswarms.Telegram.IngressEffectsTest do
 
     @impl true
     def deliver_to_session(_session, _text, _opts), do: :ok
+
+    @impl true
+    def teardown_session(_session, _reason, _opts), do: :ok
+  end
+
+  defmodule Runtime do
+    @behaviour Genswarms.Telegram.SessionRuntime
+
+    @impl true
+    def ensure_session(conversation_id, opts) do
+      send(Process.get(:ingress_runtime_parent), {:runtime_ensure, conversation_id, opts})
+      {:ok, %{slot: :runtime_slot, workspace: "/tmp/runtime-workspace"}}
+    end
+
+    @impl true
+    def bind_session(_session, conversation_id, sinks, _opts) do
+      send(Process.get(:ingress_runtime_parent), {:runtime_bind, conversation_id, sinks})
+      :ok
+    end
+
+    @impl true
+    def deliver_to_session(session, text, opts) do
+      send(Process.get(:ingress_runtime_parent), {:runtime_deliver, session, text, opts})
+      :ok
+    end
 
     @impl true
     def teardown_session(_session, _reason, _opts), do: :ok

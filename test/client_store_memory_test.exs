@@ -348,6 +348,7 @@ defmodule Genswarms.Telegram.ClientStoreMemoryTest do
     assert IdentitySink.Noop.mark_unreachable("bot", "tg:1:0", :blocked) == :ok
 
     assert InboundEffects.Noop.init([]) == {:ok, %{}}
+
     assert InboundEffects.Noop.before_route(%{id: 1}, %{}, %{seen: 1}) ==
              {:cont, %{id: 1}, %{seen: 1}}
 
@@ -515,6 +516,7 @@ defmodule Genswarms.Telegram.ClientStoreMemoryTest do
 
     assert {:bwrap, backend_opts} = spec.backend
     assert backend_opts.workspace == session.workspace
+
     assert backend_opts.extra_env == %{
              "TEMPLATE_ENV" => "1",
              "HOST_ENV" => "1",
@@ -671,11 +673,13 @@ defmodule Genswarms.Telegram.ClientStoreMemoryTest do
              })
 
     assert session.slot == :telegram_agent_0
+
     assert :ok =
              DefaultRuntime.teardown_session(%{}, :normal, %{
                workspace_root: root,
                wipe_workspace: false
              })
+
     assert String.ends_with?(DefaultRuntime.workspace_root(), "genswarms-telegram")
   end
 

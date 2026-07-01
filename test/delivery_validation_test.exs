@@ -126,6 +126,7 @@ defmodule Genswarms.Telegram.DeliveryValidationTest do
 
   test "inline keyboards reject unsafe action payloads before Telegram sees them" do
     assert Delivery.reply_markup([]) == nil
+
     assert Delivery.reply_markup(%{inline_keyboard: [[%{text: "Open", url: "https://ok.test"}]]}) ==
              %{inline_keyboard: [[%{text: "Open", url: "https://ok.test"}]]}
 
@@ -142,7 +143,9 @@ defmodule Genswarms.Telegram.DeliveryValidationTest do
     end
 
     assert_raise ArgumentError, "switch_inline_query must be <= 256 bytes", fn ->
-      Delivery.reply_markup([[%{text: "Search", switch_inline_query: String.duplicate("x", 257)}]])
+      Delivery.reply_markup([
+        [%{text: "Search", switch_inline_query: String.duplicate("x", 257)}]
+      ])
     end
 
     assert_raise ArgumentError, "switch_inline_query_current_chat must be <= 256 bytes", fn ->
@@ -151,11 +154,16 @@ defmodule Genswarms.Telegram.DeliveryValidationTest do
       ])
     end
 
-    assert_raise ArgumentError, "switch_inline_query_chosen_chat query must be <= 256 bytes", fn ->
-      Delivery.reply_markup([
-        %{text: "Choose", switch_inline_query_chosen_chat: %{query: String.duplicate("x", 257)}}
-      ])
-    end
+    assert_raise ArgumentError,
+                 "switch_inline_query_chosen_chat query must be <= 256 bytes",
+                 fn ->
+                   Delivery.reply_markup([
+                     %{
+                       text: "Choose",
+                       switch_inline_query_chosen_chat: %{query: String.duplicate("x", 257)}
+                     }
+                   ])
+                 end
 
     assert_raise ArgumentError, "copy_text must be <= 256 bytes", fn ->
       Delivery.reply_markup([[%{text: "Copy", copy_text: %{text: String.duplicate("x", 257)}}]])
@@ -250,16 +258,18 @@ defmodule Genswarms.Telegram.DeliveryValidationTest do
       Delivery.build_save_prepared_keyboard_button(%{user_id: 123, button: %{text: "Choose"}})
     end
 
-    assert_raise ArgumentError, "prepared keyboard button can specify only one request action", fn ->
-      Delivery.build_save_prepared_keyboard_button(%{
-        user_id: 123,
-        button: %{
-          text: "Choose",
-          request_users: %{request_id: 1},
-          request_chat: %{request_id: 2}
-        }
-      })
-    end
+    assert_raise ArgumentError,
+                 "prepared keyboard button can specify only one request action",
+                 fn ->
+                   Delivery.build_save_prepared_keyboard_button(%{
+                     user_id: 123,
+                     button: %{
+                       text: "Choose",
+                       request_users: %{request_id: 1},
+                       request_chat: %{request_id: 2}
+                     }
+                   })
+                 end
   end
 
   test "bot command and profile builders validate admin metadata instead of passing garbage" do
@@ -272,17 +282,23 @@ defmodule Genswarms.Telegram.DeliveryValidationTest do
       Delivery.build_set_my_commands(%{commands: []})
     end
 
-    assert_raise ArgumentError, "command must be 1 to 32 lowercase letters, digits, or underscores", fn ->
-      Delivery.build_set_my_commands(%{commands: [%{command: "Bad", description: "bad"}]})
-    end
+    assert_raise ArgumentError,
+                 "command must be 1 to 32 lowercase letters, digits, or underscores",
+                 fn ->
+                   Delivery.build_set_my_commands(%{
+                     commands: [%{command: "Bad", description: "bad"}]
+                   })
+                 end
 
     assert_raise ArgumentError, "bot command must be an object", fn ->
       Delivery.build_set_my_commands(%{commands: ["bad"]})
     end
 
-    assert_raise ArgumentError, "language_code must be empty or a two-letter lowercase code", fn ->
-      Delivery.build_get_my_commands(%{language_code: "EN"})
-    end
+    assert_raise ArgumentError,
+                 "language_code must be empty or a two-letter lowercase code",
+                 fn ->
+                   Delivery.build_get_my_commands(%{language_code: "EN"})
+                 end
 
     assert_raise ArgumentError, "scope must be an object", fn ->
       Delivery.build_delete_my_commands(%{scope: "private"})
@@ -482,14 +498,16 @@ defmodule Genswarms.Telegram.DeliveryValidationTest do
       })
     end
 
-    assert_raise ArgumentError, "reaction removal requires only one of user_id or actor_chat_id", fn ->
-      Delivery.build_delete_message_reaction(%{
-        chat_id: 1,
-        message_id: 2,
-        user_id: 3,
-        actor_chat_id: 4
-      })
-    end
+    assert_raise ArgumentError,
+                 "reaction removal requires only one of user_id or actor_chat_id",
+                 fn ->
+                   Delivery.build_delete_message_reaction(%{
+                     chat_id: 1,
+                     message_id: 2,
+                     user_id: 3,
+                     actor_chat_id: 4
+                   })
+                 end
 
     assert_raise ArgumentError, "sticker_type must be regular, mask, or custom_emoji", fn ->
       Delivery.build_create_new_sticker_set(%{

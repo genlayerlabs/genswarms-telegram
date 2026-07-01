@@ -269,7 +269,11 @@ defmodule Genswarms.Telegram.SenderFailureModesTest do
     {:reply, body, state} =
       Sender.handle_message(
         :other,
-        %{"action" => "bind_session", "slot" => "telegram_agent_0", "conversation_id" => "tg:1:0"},
+        %{
+          "action" => "bind_session",
+          "slot" => "telegram_agent_0",
+          "conversation_id" => "tg:1:0"
+        },
         state
       )
 
@@ -279,7 +283,11 @@ defmodule Genswarms.Telegram.SenderFailureModesTest do
     {:noreply, state} =
       Sender.handle_message(
         :ingress_a,
-        %{"action" => "bind_session", "slot" => "telegram_agent_0", "conversation_id" => "tg:1:0"},
+        %{
+          "action" => "bind_session",
+          "slot" => "telegram_agent_0",
+          "conversation_id" => "tg:1:0"
+        },
         state
       )
 
@@ -327,8 +335,7 @@ defmodule Genswarms.Telegram.SenderFailureModesTest do
     assert Fake.calls(fake) == []
 
     assert_receive {:after_delivery, %{conversation_id: "tg:123:0", text: "   "},
-                    %{ok: false, result: {:error, :empty}},
-                    %{origin: :proactive, mark: "m1"}}
+                    %{ok: false, result: {:error, :empty}}, %{origin: :proactive, mark: "m1"}}
 
     assert state.sent == []
 
@@ -546,22 +553,29 @@ defmodule Genswarms.Telegram.SenderFailureModesTest do
 
   test "public sender helpers classify Telegram responses and rate limit disabled windows" do
     assert Sender.extract_message_id(~s({"ok":true,"result":{"message_id":44}})) == {:ok, 44}
-    assert Sender.extract_message_id(~s({"ok":true,"result":{}})) == {:failed, "no message_id in response"}
+
+    assert Sender.extract_message_id(~s({"ok":true,"result":{}})) ==
+             {:failed, "no message_id in response"}
 
     assert {:unreachable, "blocked"} =
-             Sender.extract_message_id(
-               ~s({"ok":false,"error_code":403,"description":"blocked"})
-             )
+             Sender.extract_message_id(~s({"ok":false,"error_code":403,"description":"blocked"}))
 
-    assert Sender.classify_send_response(~s({"ok":false,"error_code":429,"parameters":{"retry_after":2},"description":"slow"})) ==
+    assert Sender.classify_send_response(
+             ~s({"ok":false,"error_code":429,"parameters":{"retry_after":2},"description":"slow"})
+           ) ==
              {:retry_after, 2}
 
     assert Sender.throttle_decision([1, 2, 3], 10, 0) == {:proceed, [10, 1, 2, 3]}
     assert Sender.build_send_body("tg:123:9", "hi", nil, nil, nil).message_thread_id == 9
-    assert Sender.resolve_photo({"sent", nil}, :state, fn _ -> flunk("should not resolve fallback") end) ==
+
+    assert Sender.resolve_photo({"sent", nil}, :state, fn _ ->
+             flunk("should not resolve fallback")
+           end) ==
              {"sent", nil, :state}
 
-    assert Sender.resolve_photo({"failed", nil}, :state, fn state -> {"fallback", "photo", state} end) ==
+    assert Sender.resolve_photo({"failed", nil}, :state, fn state ->
+             {"fallback", "photo", state}
+           end) ==
              {"fallback", "photo", :state}
   end
 end
