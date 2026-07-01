@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18"
+          otp-version: "27"
+      - run: sudo apt-get update && sudo apt-get install -y jq
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      - run: mix compile --warnings-as-errors
+      - run: mix test
+      - run: |
+          ! grep -R -n -E 'Wingston|WINGSTON_|rally_data|/tmp/szc-workspace/wingston|wingston_agent' lib priv examples
