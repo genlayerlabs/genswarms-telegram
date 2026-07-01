@@ -146,7 +146,7 @@ defmodule Genswarms.Telegram.CardContractTest do
             " ",
             %{"kind" => "mention", "username" => "ada", "text" => "Ada"},
             " ",
-            %{"kind" => "mention", "username" => "wingston"},
+            %{"kind" => "mention", "username" => "example_bot"},
             " ",
             %{"kind" => "text_mention", "user_id" => 123, "text" => "User"},
             " ",
@@ -271,7 +271,7 @@ defmodule Genswarms.Telegram.CardContractTest do
     assert html =~ ~s(<a href="https://example.com">Open</a>)
     assert html =~ ~s(<tg-emoji emoji-id="emoji-1">CE</tg-emoji>)
     assert html =~ ~s(<tg-time unix="1800000000" format="date">date</tg-time>)
-    assert html =~ "Ada @wingston"
+    assert html =~ "Ada @example_bot"
     assert html =~ ~s(<a href="tg://user?id=123">User</a>)
     assert html =~ "<tg-math>x^2</tg-math>"
     assert html =~ ~s(<a href="mailto:team@example.com">team@example.com</a>)

@@ -109,7 +109,7 @@ conversation_id = "tg:123:0"
   },
   %{
     action: "set_my_name",
-    name: "Wingston"
+    name: "Acme Concierge"
   },
   %{
     action: "get_my_name",
@@ -117,14 +117,14 @@ conversation_id = "tg:123:0"
   },
   %{
     action: "set_my_description",
-    description: "Rally assistant"
+    description: "support assistant"
   },
   %{
     action: "get_my_description"
   },
   %{
     action: "set_my_short_description",
-    short_description: "Rally assistant"
+    short_description: "support assistant"
   },
   %{
     action: "get_my_short_description"
@@ -379,18 +379,18 @@ conversation_id = "tg:123:0"
   %{
     action: "set_business_account_name",
     business_connection_id: "biz_123",
-    first_name: "Wingston",
+    first_name: "Acme Concierge",
     last_name: ""
   },
   %{
     action: "set_business_account_username",
     business_connection_id: "biz_123",
-    username: "wingston"
+    username: "example_bot"
   },
   %{
     action: "set_business_account_bio",
     business_connection_id: "biz_123",
-    bio: "Rally assistant"
+    bio: "support assistant"
   },
   %{
     action: "set_business_account_profile_photo",
@@ -452,7 +452,7 @@ conversation_id = "tg:123:0"
   %{
     action: "send_game",
     conversation_id: conversation_id,
-    game_short_name: "rally_quest"
+    game_short_name: "trivia_quest"
   },
   %{
     action: "edit_message",
@@ -543,8 +543,8 @@ conversation_id = "tg:123:0"
   %{
     action: "create_new_sticker_set",
     user_id: 42,
-    name: "wingston_by_bot",
-    title: "Wingston",
+    name: "acme_by_bot",
+    title: "Acme Concierge",
     stickers: [%{sticker: "attach://sticker", emoji_list: ["🪽"], format: "static"}],
     sticker_type: "regular"
   },

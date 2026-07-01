@@ -87,7 +87,7 @@ defmodule Genswarms.Telegram.ConversationIdFormatTest do
       [%{"text" => "Bad", "url" => "javascript:alert(1)"}],
       [%{"text" => "Callback", "action" => "go"}],
       [%{"text" => "App", "web_app" => "https://example.com/app"}],
-      [%{"text" => "Search", "switch_inline_query" => "wingston"}],
+      [%{"text" => "Search", "switch_inline_query" => "example"}],
       [
         %{
           "text" => "Chosen",
@@ -103,7 +103,7 @@ defmodule Genswarms.Telegram.ConversationIdFormatTest do
              [%{text: "Open", url: "https://example.com"}],
              [%{text: "Callback", callback_data: "go"}],
              [%{text: "App", web_app: %{url: "https://example.com/app"}}],
-             [%{text: "Search", switch_inline_query: "wingston"}],
+             [%{text: "Search", switch_inline_query: "example"}],
              [
                %{
                  text: "Chosen",
@@ -200,7 +200,7 @@ defmodule Genswarms.Telegram.ConversationIdFormatTest do
   end
 
   test "basic command router strips bot names and fails closed on non-command input" do
-    assert Basic.handle_command(%{text: "/start@WingstonBot hello"}, %{}) == {:reply, "Started."}
+    assert Basic.handle_command(%{text: "/start@ExampleBot hello"}, %{}) == {:reply, "Started."}
 
     assert Basic.handle_command(%{text: "   /help"}, %{}) ==
              {:reply, "Send a message and I will route it to the swarm."}

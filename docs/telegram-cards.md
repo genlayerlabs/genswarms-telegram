@@ -559,7 +559,7 @@ autonomous agent.
 {
   "action": "send_game",
   "conversation_id": "tg:123:0",
-  "game_short_name": "rally_quest"
+  "game_short_name": "trivia_quest"
 }
 ```
 
@@ -687,7 +687,7 @@ autonomous agent.
 {
   "action": "set_business_account_name",
   "business_connection_id": "biz_123",
-  "first_name": "Wingston",
+  "first_name": "Acme Concierge",
   "last_name": ""
 }
 ```
@@ -745,11 +745,11 @@ autonomous agent.
 ```
 
 ```json
-{"action": "set_my_name", "name": "Wingston"}
+{"action": "set_my_name", "name": "Acme Concierge"}
 ```
 
 ```json
-{"action": "set_my_description", "description": "Rally assistant"}
+{"action": "set_my_description", "description": "support assistant"}
 ```
 
 ```json

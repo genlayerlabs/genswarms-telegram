@@ -399,21 +399,21 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     assert get_commands._method == :get_my_commands
     assert get_commands.scope == %{type: "default"}
 
-    set_name = Delivery.build_set_my_name(%{name: "Wingston", language_code: "en"})
+    set_name = Delivery.build_set_my_name(%{name: "Acme Concierge", language_code: "en"})
     assert set_name._method == :set_my_name
-    assert set_name.name == "Wingston"
+    assert set_name.name == "Acme Concierge"
 
     get_name = Delivery.build_get_my_name(%{language_code: "en"})
     assert get_name._method == :get_my_name
 
-    set_description = Delivery.build_set_my_description(%{description: "Rally assistant"})
+    set_description = Delivery.build_set_my_description(%{description: "support assistant"})
     assert set_description._method == :set_my_description
 
     get_description = Delivery.build_get_my_description(%{})
     assert get_description._method == :get_my_description
 
     set_short =
-      Delivery.build_set_my_short_description(%{short_description: "Rally assistant"})
+      Delivery.build_set_my_short_description(%{short_description: "support assistant"})
 
     assert set_short._method == :set_my_short_description
 
@@ -1017,7 +1017,7 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     business_name =
       Delivery.build_set_business_account_name(%{
         business_connection_id: "biz-1",
-        first_name: "Wingston",
+        first_name: "Acme Concierge",
         last_name: ""
       })
 
@@ -1027,7 +1027,7 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     business_username =
       Delivery.build_set_business_account_username(%{
         business_connection_id: "biz-1",
-        username: "wingston"
+        username: "example_bot"
       })
 
     assert business_username._method == :set_business_account_username
@@ -1035,7 +1035,7 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     business_bio =
       Delivery.build_set_business_account_bio(%{
         business_connection_id: "biz-1",
-        bio: "Rally assistant"
+        bio: "support assistant"
       })
 
     assert business_bio._method == :set_business_account_bio
@@ -1155,11 +1155,11 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     game =
       Delivery.build_send_game(%{
         conversation_id: "tg:123:0",
-        game_short_name: "rally_quest"
+        game_short_name: "trivia_quest"
       })
 
     assert game._method == :send_game
-    assert game.game_short_name == "rally_quest"
+    assert game.game_short_name == "trivia_quest"
 
     chat_action =
       Delivery.build_send_chat_action(%{
@@ -1194,12 +1194,12 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
 
     delete_reactions =
       Delivery.build_delete_all_message_reactions(%{
-        chat_id: "@wingston",
+        chat_id: "@example_bot",
         actor_chat_id: -100_123
       })
 
     assert delete_reactions._method == :delete_all_message_reactions
-    assert delete_reactions.chat_id == "@wingston"
+    assert delete_reactions.chat_id == "@example_bot"
     assert delete_reactions.actor_chat_id == -100_123
 
     ban =
@@ -1284,8 +1284,8 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     assert emoji_status._method == :set_user_emoji_status
     assert emoji_status.emoji_status_custom_emoji_id == "emoji-1"
 
-    sticker_set = Delivery.build_get_sticker_set(%{name: "wingston_by_bot"})
-    assert sticker_set == %{_method: :get_sticker_set, name: "wingston_by_bot"}
+    sticker_set = Delivery.build_get_sticker_set(%{name: "acme_by_bot"})
+    assert sticker_set == %{_method: :get_sticker_set, name: "acme_by_bot"}
 
     custom_emoji =
       Delivery.build_get_custom_emoji_stickers(%{custom_emoji_ids: ["emoji-1", "emoji-2"]})
@@ -1304,8 +1304,8 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     new_set =
       Delivery.build_create_new_sticker_set(%{
         user_id: 42,
-        name: "wingston_by_bot",
-        title: "Wingston",
+        name: "acme_by_bot",
+        title: "Acme Concierge",
         stickers: [%{sticker: "attach://sticker", emoji_list: ["🪽"], format: "static"}],
         sticker_type: :regular
       })
@@ -1317,19 +1317,19 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     replace_sticker =
       Delivery.build_replace_sticker_in_set(%{
         user_id: 42,
-        name: "wingston_by_bot",
+        name: "acme_by_bot",
         old_sticker: "old-file",
         sticker: %{sticker: "attach://new", emoji_list: ["🪽"], format: "static"}
       })
 
     assert replace_sticker.old_sticker == "old-file"
 
-    keywords = Delivery.build_set_sticker_keywords(%{sticker: "file-1", keywords: ["wingston"]})
-    assert keywords.keywords == ["wingston"]
+    keywords = Delivery.build_set_sticker_keywords(%{sticker: "file-1", keywords: ["example"]})
+    assert keywords.keywords == ["example"]
 
     thumbnail =
       Delivery.build_set_sticker_set_thumbnail(%{
-        name: "wingston_by_bot",
+        name: "acme_by_bot",
         user_id: 42,
         thumbnail: "attach://thumb",
         format: "static"
@@ -1430,8 +1430,8 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     assert_raise ArgumentError, ~r/stickers must contain 1 to 50/, fn ->
       Delivery.build_create_new_sticker_set(%{
         user_id: 42,
-        name: "wingston_by_bot",
-        title: "Wingston",
+        name: "acme_by_bot",
+        title: "Acme Concierge",
         stickers: []
       })
     end
@@ -1453,7 +1453,7 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     assert_raise ArgumentError,
                  ~r/language_code must be empty or a two-letter lowercase code/,
                  fn ->
-                   Delivery.build_set_my_name(%{name: "Wingston", language_code: "eng"})
+                   Delivery.build_set_my_name(%{name: "Acme Concierge", language_code: "eng"})
                  end
 
     assert_raise ArgumentError, ~r/description must be 0 to 512 characters/, fn ->
@@ -2243,8 +2243,8 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
         %{
           "action" => "create_new_sticker_set",
           "user_id" => 42,
-          "name" => "wingston_by_bot",
-          "title" => "Wingston",
+          "name" => "acme_by_bot",
+          "title" => "Acme Concierge",
           "stickers" => [
             %{"sticker" => "attach://sticker", "emoji_list" => ["🪽"], "format" => "static"}
           ],
@@ -2256,7 +2256,7 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     {:noreply, _state} =
       Sender.handle_message(
         :telegram_ingress,
-        %{"action" => "delete_sticker_set", "name" => "wingston_by_bot"},
+        %{"action" => "delete_sticker_set", "name" => "acme_by_bot"},
         state
       )
 
@@ -2269,8 +2269,8 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
            ]
 
     assert Enum.at(calls, 0).payload.file_id == "file-123"
-    assert Enum.at(calls, 1).payload.name == "wingston_by_bot"
-    assert Enum.at(calls, 2).payload.name == "wingston_by_bot"
+    assert Enum.at(calls, 1).payload.name == "acme_by_bot"
+    assert Enum.at(calls, 2).payload.name == "acme_by_bot"
   end
 
   test "sender accepts safe reply markup beyond inline buttons" do
@@ -2943,11 +2943,11 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
       },
       %{"action" => "delete_my_commands", "language_code" => "en"},
       %{"action" => "get_my_commands", "scope" => %{"type" => "default"}},
-      %{"action" => "set_my_name", "name" => "Wingston"},
+      %{"action" => "set_my_name", "name" => "Acme Concierge"},
       %{"action" => "get_my_name", "language_code" => "en"},
-      %{"action" => "set_my_description", "description" => "Rally assistant"},
+      %{"action" => "set_my_description", "description" => "support assistant"},
       %{"action" => "get_my_description"},
-      %{"action" => "set_my_short_description", "short_description" => "Rally assistant"},
+      %{"action" => "set_my_short_description", "short_description" => "support assistant"},
       %{"action" => "get_my_short_description"},
       %{
         "action" => "set_my_profile_photo",
@@ -2998,7 +2998,7 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
              %{command: "start", description: "Start the bot"}
            ]
 
-    assert Enum.at(calls, 3).payload.name == "Wingston"
+    assert Enum.at(calls, 3).payload.name == "Acme Concierge"
     assert Enum.at(calls, 9).payload.photo == %{"type" => "static", "photo" => "attach://profile"}
     assert Enum.at(calls, 10).payload == %{}
     assert Enum.at(calls, 11).payload.menu_button == %{"type" => "commands"}
@@ -3180,17 +3180,17 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
       %{
         "action" => "set_business_account_name",
         "business_connection_id" => "biz-1",
-        "first_name" => "Wingston"
+        "first_name" => "Acme Concierge"
       },
       %{
         "action" => "set_business_account_username",
         "business_connection_id" => "biz-1",
-        "username" => "wingston"
+        "username" => "example_bot"
       },
       %{
         "action" => "set_business_account_bio",
         "business_connection_id" => "biz-1",
-        "bio" => "Rally assistant"
+        "bio" => "support assistant"
       },
       %{
         "action" => "set_business_account_profile_photo",
@@ -3242,7 +3242,7 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     assert Enum.at(calls, 0).payload.custom_description == "Official"
     assert Enum.at(calls, 4).payload.message_id == 10
     assert Enum.at(calls, 5).payload.message_ids == [11, 12]
-    assert Enum.at(calls, 6).payload.first_name == "Wingston"
+    assert Enum.at(calls, 6).payload.first_name == "Acme Concierge"
 
     assert Enum.at(calls, 9).payload.photo == %{
              "type" => "static",
@@ -3389,7 +3389,7 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
       %{
         "action" => "send_game",
         "conversation_id" => "tg:123:0",
-        "game_short_name" => "rally_quest"
+        "game_short_name" => "trivia_quest"
       },
       %{
         "action" => "delete_message",
@@ -3441,7 +3441,7 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
 
     assert Enum.at(calls, 9).payload.star_count == 5
     assert Enum.at(calls, 10).payload.currency == "XTR"
-    assert Enum.at(calls, 11).payload.game_short_name == "rally_quest"
+    assert Enum.at(calls, 11).payload.game_short_name == "trivia_quest"
     assert Enum.at(calls, 13).payload.message_ids == [30, 31]
     assert length(final_state.sent) == 14
   end

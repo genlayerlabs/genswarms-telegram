@@ -160,11 +160,11 @@ Sender:
 - `{"action":"set_my_commands","commands":[{"command":"start","description":"Start the bot"}]}`
 - `{"action":"delete_my_commands","language_code":"en"}`
 - `{"action":"get_my_commands","scope":{"type":"default"}}`
-- `{"action":"set_my_name","name":"Wingston"}`
+- `{"action":"set_my_name","name":"Acme Concierge"}`
 - `{"action":"get_my_name","language_code":"en"}`
-- `{"action":"set_my_description","description":"Rally assistant"}`
+- `{"action":"set_my_description","description":"support assistant"}`
 - `{"action":"get_my_description"}`
-- `{"action":"set_my_short_description","short_description":"Rally assistant"}`
+- `{"action":"set_my_short_description","short_description":"support assistant"}`
 - `{"action":"get_my_short_description"}`
 - `{"action":"set_my_profile_photo","photo":{"type":"static","photo":"attach://profile"}}`
 - `{"action":"remove_my_profile_photo"}`
@@ -198,8 +198,8 @@ Sender:
 - `{"action":"close_forum_topic","chat_id":-100123,"message_thread_id":5}`
 - `{"action":"get_file","file_id":"<file_id>"}`
 - `{"action":"get_custom_emoji_stickers","custom_emoji_ids":["emoji_1"]}`
-- `{"action":"create_new_sticker_set","user_id":123,"name":"wingston_by_bot","title":"Wingston","stickers":[{"sticker":"attach://sticker","emoji_list":["🪽"],"format":"static"}]}`
-- `{"action":"delete_sticker_set","name":"wingston_by_bot"}`
+- `{"action":"create_new_sticker_set","user_id":123,"name":"acme_by_bot","title":"Acme Concierge","stickers":[{"sticker":"attach://sticker","emoji_list":["🪽"],"format":"static"}]}`
+- `{"action":"delete_sticker_set","name":"acme_by_bot"}`
 - `{"action":"send_media","conversation_id":"tg:123:0","media_type":"animation","media":"https://..."}`
 - `{"action":"send_live_photo","conversation_id":"tg:123:0","live_photo":"<file_id>","photo":"<file_id>"}`
 - `{"action":"send_video_note","conversation_id":"tg:123:0","video_note":"<file_id>"}`
@@ -233,9 +233,9 @@ Sender:
 - `{"action":"remove_chat_verification","chat_id":"@channel"}`
 - `{"action":"read_business_message","business_connection_id":"biz_123","chat_id":123,"message_id":456}`
 - `{"action":"delete_business_messages","business_connection_id":"biz_123","message_ids":[456,457]}`
-- `{"action":"set_business_account_name","business_connection_id":"biz_123","first_name":"Wingston"}`
-- `{"action":"set_business_account_username","business_connection_id":"biz_123","username":"wingston"}`
-- `{"action":"set_business_account_bio","business_connection_id":"biz_123","bio":"Rally assistant"}`
+- `{"action":"set_business_account_name","business_connection_id":"biz_123","first_name":"Acme Concierge"}`
+- `{"action":"set_business_account_username","business_connection_id":"biz_123","username":"example_bot"}`
+- `{"action":"set_business_account_bio","business_connection_id":"biz_123","bio":"support assistant"}`
 - `{"action":"set_business_account_profile_photo","business_connection_id":"biz_123","photo":{"type":"static","photo":"attach://profile-photo"}}`
 - `{"action":"remove_business_account_profile_photo","business_connection_id":"biz_123","is_public":false}`
 - `{"action":"set_business_account_gift_settings","business_connection_id":"biz_123","show_gift_button":true,"accepted_gift_types":{"unlimited_gifts":true,"limited_gifts":false,"unique_gifts":true,"premium_subscription":false}}`
@@ -245,7 +245,7 @@ Sender:
 - `{"action":"set_game_score","user_id":123,"score":42,"chat_id":"@gamechat","message_id":456}`
 - `{"action":"get_game_high_scores","user_id":123,"inline_message_id":"inline-game"}`
 - `{"action":"refund_star_payment","user_id":123,"telegram_payment_charge_id":"charge_123"}`
-- `{"action":"send_game","conversation_id":"tg:123:0","game_short_name":"rally_quest"}`
+- `{"action":"send_game","conversation_id":"tg:123:0","game_short_name":"trivia_quest"}`
 - `{"action":"send_location","conversation_id":"tg:123:0","latitude":41.3874,"longitude":2.1686}`
 - `{"action":"send_venue","conversation_id":"tg:123:0","latitude":41.3874,"longitude":2.1686,"title":"HQ","address":"Barcelona"}`
 - `{"action":"send_contact","conversation_id":"tg:123:0","phone_number":"+34123456789","first_name":"Example"}`
