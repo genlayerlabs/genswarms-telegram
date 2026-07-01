@@ -3,7 +3,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   Telegram inbound GenSwarms object.
   """
 
-  alias Genswarms.Telegram.{Adapter, Client, ConversationId, Delivery, Parser, Poller}
+  alias Genswarms.Telegram.{Adapter, Addressing, Client, ConversationId, Delivery, Parser, Poller}
 
   def init(config \\ %{}) do
     state = new(config)
@@ -235,7 +235,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   end
 
   defp handle_event(%{type: :text, text: "/" <> _} = event, state) do
-    if command_addressed?(event.text, state.bot_username || discover_username(state)) do
+    if Addressing.command_addressed?(event.text, state.bot_username || discover_username(state)) do
       _ = maybe_upsert_identity(state, event)
       route_command(:command, event, state)
     else
@@ -519,65 +519,15 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   defp encode_payload(payload) when is_map(payload), do: Jason.encode!(payload)
 
   defp addressed?(event, state) do
-    case ConversationId.chat_type(event.conversation_id) do
-      :dm -> true
-      :group -> group_addressed?(event, state)
-      :unknown -> false
-    end
-  end
-
-  defp group_addressed?(event, state) do
-    username = state.bot_username || discover_username(state)
-
-    cond do
-      is_nil(username) ->
-        state.fail_open_without_username?
-
-      event.reply_to_bot_username &&
-          String.downcase(event.reply_to_bot_username) == String.downcase(username) ->
-        true
-
-      String.match?(event.text || "", mention_regex(username)) ->
-        true
-
-      true ->
-        false
-    end
+    Addressing.addressed?(event, state.bot_username || discover_username(state),
+      fail_open_without_username?: state.fail_open_without_username?
+    )
   end
 
   defp discover_username(state) do
     case Client.get_me(state.client, client_opts(state)) do
       {:ok, %{"username" => username}} -> username
       _ -> nil
-    end
-  end
-
-  defp command_addressed?(text, bot_username) do
-    case command_target(text) do
-      :bare ->
-        true
-
-      {:target, target} when is_binary(bot_username) ->
-        String.downcase(target) == String.downcase(bot_username)
-
-      {:target, _target} ->
-        false
-
-      :not_command ->
-        false
-    end
-  end
-
-  defp command_target(text) do
-    case text |> to_string() |> String.trim_leading() |> String.split(~r/\s+/, parts: 2) do
-      ["/" <> raw | _] ->
-        case String.split(raw, "@", parts: 2) do
-          [_verb, target] when target != "" -> {:target, target}
-          _ -> :bare
-        end
-
-      _ ->
-        :not_command
     end
   end
 
@@ -607,7 +557,6 @@ defmodule Genswarms.Telegram.Objects.Ingress do
     ]
   end
 
-  defp mention_regex(username), do: ~r/(^|[^\w])@#{Regex.escape(username)}([^\w]|$)/i
   defp client_opts(state), do: Keyword.merge([token: state.token], state.client_opts)
   defp decode(message) when is_binary(message), do: Jason.decode(message)
   defp decode(message) when is_map(message), do: {:ok, message}

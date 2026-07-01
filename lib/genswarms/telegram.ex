@@ -7,7 +7,7 @@ defmodule Genswarms.Telegram do
   logic, and domain commands belong in the consuming swarm.
   """
 
-  @version "0.1.1"
+  @version "0.1.4"
 
   def version, do: @version
 end

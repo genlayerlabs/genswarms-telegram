@@ -218,6 +218,42 @@ defmodule Genswarms.Telegram.ObjectsTest do
     assert Enum.at(calls, 3).payload.text == "photo text"
   end
 
+  test "sender normalizes safe buttons and drops invalid buttons", %{fake: fake} do
+    {:ok, state} =
+      Sender.init(%{
+        bot_token: "token",
+        client: Fake,
+        client_opts: [fake: fake],
+        send_sources: [:cron]
+      })
+
+    {:noreply, _state} =
+      Sender.handle_message(
+        :cron,
+        %{
+          "action" => "send",
+          "conversation_id" => "tg:3:0",
+          "text" => "pick",
+          "buttons" => [
+            [%{"text" => "Open", "url" => "https://example.com"}],
+            [%{"text" => "Mode", "action" => "mode quiet"}],
+            [%{"text" => "Bad", "url" => "javascript:alert"}],
+            [%{"text" => "Long", "action" => String.duplicate("a", 65)}]
+          ]
+        },
+        state
+      )
+
+    [call] = Fake.calls(fake)
+
+    assert call.payload.reply_markup == %{
+             inline_keyboard: [
+               [%{text: "Open", url: "https://example.com"}],
+               [%{text: "Mode", callback_data: "mode quiet"}]
+             ]
+           }
+  end
+
   test "sender rejects explicit targets from unauthorized sources", %{fake: fake} do
     {:ok, state} =
       Sender.init(%{

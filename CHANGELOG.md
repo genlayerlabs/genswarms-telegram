@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.4 - 2026-07-01
+
+- Added public generic Telegram addressing helpers.
+- Added public generic spam guard helpers.
+- Added safe inline-keyboard normalization, including `action` callback aliases.
+- Added single-file offset helpers for hosts with existing getUpdates offset files.
+- Updated ingress and sender objects to use the new generic helpers.
+
 ## 0.1.3 - 2026-07-01
 
 - Corrected the public swarmidx scope to the token-backed registry scope.

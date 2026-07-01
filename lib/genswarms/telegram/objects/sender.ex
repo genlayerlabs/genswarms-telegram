@@ -3,7 +3,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
   Telegram outbound GenSwarms object.
   """
 
-  alias Genswarms.Telegram.{Adapter, Client, ConversationId, Delivery}
+  alias Genswarms.Telegram.{Adapter, Buttons, Client, ConversationId, Delivery}
 
   @audit_max 1_000
   @inbound_max 8
@@ -213,7 +213,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
     chunks = Delivery.chunk_text(text)
     last = length(chunks) - 1
     reply_to = validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state)
-    buttons = normalize_buttons(Map.get(msg, "buttons"))
+    buttons = Buttons.normalize(Map.get(msg, "buttons"))
     photo = photo_for_text(Map.get(msg, "photo"), text)
 
     {results, state} =
@@ -490,16 +490,6 @@ defmodule Genswarms.Telegram.Objects.Sender do
       nil -> payload
       thread -> Map.put(payload, :message_thread_id, thread)
     end
-  end
-
-  defp normalize_buttons(nil), do: nil
-
-  defp normalize_buttons(buttons) when is_list(buttons) do
-    Enum.map(buttons, fn
-      %{"text" => text, "url" => url} -> %{text: text, url: url}
-      %{"text" => text, "callback_data" => data} -> %{text: text, callback_data: data}
-      other -> other
-    end)
   end
 
   defp photo_for_text(photo, text) when is_binary(photo) and photo != "" do
