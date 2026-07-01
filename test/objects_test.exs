@@ -164,6 +164,59 @@ defmodule Genswarms.Telegram.ObjectsTest do
            }
   end
 
+  test "sender keeps quote fields on validated bound replies", %{fake: fake} do
+    {:ok, state} =
+      Sender.init(%{
+        bot_token: "token",
+        client: Fake,
+        client_opts: [fake: fake],
+        binding_authority: :telegram_ingress,
+        slot_prefix: "telegram_agent"
+      })
+
+    {:noreply, state} =
+      Sender.handle_message(
+        :telegram_ingress,
+        %{
+          "action" => "bind_session",
+          "slot" => "telegram_agent_0",
+          "conversation_id" => "tg:1:0"
+        },
+        state
+      )
+
+    {:noreply, state} =
+      Sender.handle_message(
+        :telegram_ingress,
+        %{"action" => "typing", "conversation_id" => "tg:1:0", "message_id" => 55},
+        state
+      )
+
+    {:noreply, _state} =
+      Sender.handle_message(
+        :telegram_agent_0,
+        %{
+          "action" => "reply",
+          "text" => "replying to the quote",
+          "reply_to_message_id" => "55",
+          "quote" => "the quote",
+          "quote_position" => "13",
+          "quote_parse_mode" => "HTML"
+        },
+        state
+      )
+
+    [_typing, reply] = Fake.calls(fake)
+
+    assert reply.payload.reply_parameters == %{
+             message_id: 55,
+             allow_sending_without_reply: true,
+             quote: "the quote",
+             quote_position: 13,
+             quote_parse_mode: "HTML"
+           }
+  end
+
   test "sender posts progress once then edits the progress message", %{fake: fake} do
     Fake.push_response(fake, {:ok, %{"message_id" => 77}})
     Fake.push_response(fake, {:ok, %{"message_id" => 77}})

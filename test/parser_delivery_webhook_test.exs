@@ -1,7 +1,7 @@
 defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
   use ExUnit.Case, async: true
 
-  alias Genswarms.Telegram.{Delivery, Parser, Webhook}
+  alias Genswarms.Telegram.{Card, Delivery, Parser, Webhook}
 
   test "parser normalizes text and callback updates" do
     update = %{
@@ -63,6 +63,40 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
              Parser.parse_update(member)
   end
 
+  test "parser exposes replied-to text quote context" do
+    update = %{
+      "update_id" => 11,
+      "message" => %{
+        "message_id" => 20,
+        "chat" => %{"id" => 123, "type" => "private"},
+        "from" => %{"id" => 5, "username" => "alice"},
+        "text" => "that part",
+        "reply_to_message" => %{
+          "message_id" => 19,
+          "text" => "Please focus on that part of the answer.",
+          "from" => %{"username" => "example_bot", "is_bot" => true}
+        },
+        "quote" => %{"text" => "that part", "position" => 16}
+      }
+    }
+
+    assert {:ok, event} = Parser.parse_update(update)
+    assert event.reply_to_bot_username == "example_bot"
+    assert event.replied_to.message_id == 19
+    assert event.replied_to.text == "Please focus on that part of the answer."
+    assert event.replied_to.quote == %{text: "that part", position: 16}
+  end
+
+  test "reply-with-quote example builds a valid reply payload" do
+    example =
+      Enum.find(Card.examples(), fn example ->
+        Map.get(example, :name) == "action_reply_with_quote"
+      end)
+
+    assert %{reply_parameters: %{quote: "specific phrase"}} =
+             Delivery.build_send_message(example)
+  end
+
   test "delivery builds payloads, validates buttons, and chunks by UTF-16 units" do
     payload =
       Delivery.build_send_message(%{
@@ -77,6 +111,34 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
     assert payload.parse_mode == "HTML"
     assert payload.reply_parameters == %{message_id: 9, allow_sending_without_reply: true}
     assert payload.reply_markup.inline_keyboard == [[%{text: "Open", url: "https://example.com"}]]
+
+    quoted_reply =
+      Delivery.build_send_message(%{
+        conversation_id: "tg:123:0",
+        text: "reply",
+        reply_to_message_id: 42,
+        quote: "specific phrase",
+        quote_position: 8,
+        quote_parse_mode: "HTML"
+      })
+
+    assert quoted_reply.reply_parameters == %{
+             message_id: 42,
+             allow_sending_without_reply: true,
+             quote: "specific phrase",
+             quote_position: 8,
+             quote_parse_mode: "HTML"
+           }
+
+    quote_without_reply =
+      Delivery.build_send_message(%{
+        conversation_id: "tg:123:0",
+        text: "reply",
+        quote: "specific phrase",
+        quote_position: 8
+      })
+
+    refute Map.has_key?(quote_without_reply, :reply_parameters)
 
     keyboard_payload =
       Delivery.build_send_message(%{

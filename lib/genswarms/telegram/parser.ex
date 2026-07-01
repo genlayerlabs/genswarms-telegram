@@ -66,22 +66,25 @@ defmodule Genswarms.Telegram.Parser do
     thread_id = Map.get(message, "message_thread_id", "0")
     {kind, text} = text_from_message(message)
 
-    {:ok,
-     %{
-       type: kind,
-       source: source,
-       update_id: Map.get(update, "update_id"),
-       conversation_id: ConversationId.build(chat_id, thread_id),
-       chat_id: chat_id,
-       chat_type: Map.get(chat, "type"),
-       thread_id: thread_id,
-       message_id: Map.get(message, "message_id"),
-       date: Map.get(message, "date"),
-       text: text,
-       media: media_kind(message),
-       reply_to_bot_username: get_in(message, ["reply_to_message", "from", "username"]),
-       identity: identity(Map.get(message, "from", %{}))
-     }}
+    event =
+      %{
+        type: kind,
+        source: source,
+        update_id: Map.get(update, "update_id"),
+        conversation_id: ConversationId.build(chat_id, thread_id),
+        chat_id: chat_id,
+        chat_type: Map.get(chat, "type"),
+        thread_id: thread_id,
+        message_id: Map.get(message, "message_id"),
+        date: Map.get(message, "date"),
+        text: text,
+        media: media_kind(message),
+        reply_to_bot_username: get_in(message, ["reply_to_message", "from", "username"]),
+        identity: identity(Map.get(message, "from", %{}))
+      }
+      |> maybe_put(:replied_to, replied_to(message))
+
+    {:ok, event}
   end
 
   defp parse_message(_update, _message, _source), do: :ignore
@@ -93,6 +96,37 @@ defmodule Genswarms.Telegram.Parser do
   defp media_kind(message) do
     Enum.find(@text_media, &Map.has_key?(message, &1))
   end
+
+  defp replied_to(%{"reply_to_message" => %{"message_id" => id} = replied} = message)
+       when is_integer(id) do
+    %{
+      message_id: id,
+      text: replied_text(replied),
+      quote: text_quote(message)
+    }
+  end
+
+  defp replied_to(_message), do: nil
+
+  defp replied_text(message) do
+    cond do
+      is_binary(Map.get(message, "text")) -> Map.get(message, "text")
+      is_binary(Map.get(message, "caption")) -> Map.get(message, "caption")
+      true -> nil
+    end
+  end
+
+  defp text_quote(%{"quote" => %{"text" => text} = quote}) when is_binary(text) do
+    %{
+      text: text,
+      position: quote_position(Map.get(quote, "position"))
+    }
+  end
+
+  defp text_quote(_message), do: nil
+
+  defp quote_position(position) when is_integer(position), do: position
+  defp quote_position(_position), do: nil
 
   defp identity(nil), do: %{}
 
@@ -114,4 +148,7 @@ defmodule Genswarms.Telegram.Parser do
     |> Enum.reject(fn {_k, v} -> is_nil(v) end)
     |> Map.new()
   end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 end

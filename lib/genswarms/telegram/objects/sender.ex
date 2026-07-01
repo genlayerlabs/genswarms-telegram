@@ -1304,6 +1304,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
     chunks = Delivery.chunk_text(text)
     last = length(chunks) - 1
     reply_to = validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state)
+    reply_attrs = reply_attrs(reply_to, msg)
     reply_markup = message_reply_markup(msg)
     photo = photo_for_text(Map.get(msg, "photo"), text)
 
@@ -1314,9 +1315,10 @@ defmodule Genswarms.Telegram.Objects.Sender do
         attrs = %{
           conversation_id: cid,
           text: chunk,
-          reply_to_message_id: if(idx == 0, do: reply_to),
           reply_markup: if(idx == last, do: reply_markup)
         }
+
+        attrs = if idx == 0, do: Map.merge(attrs, reply_attrs), else: attrs
 
         payload =
           case {idx, photo} do
@@ -1551,18 +1553,20 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp copy_message(from, msg, state, origin) do
     send_built_payload(from, msg, state, origin, :copy_message, fn cid ->
-      Delivery.build_copy_message(%{
-        conversation_id: cid,
-        from_chat_id: Map.get(msg, "from_chat_id"),
-        message_id: Map.get(msg, "message_id"),
-        caption: Map.get(msg, "caption") || Map.get(msg, "text"),
-        show_caption_above_media: Map.get(msg, "show_caption_above_media"),
-        video_start_timestamp: Map.get(msg, "video_start_timestamp"),
-        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
-        reply_markup: message_reply_markup(msg),
-        disable_notification: Map.get(msg, "disable_notification"),
-        protect_content: Map.get(msg, "protect_content")
-      })
+      Delivery.build_copy_message(
+        %{
+          conversation_id: cid,
+          from_chat_id: Map.get(msg, "from_chat_id"),
+          message_id: Map.get(msg, "message_id"),
+          caption: Map.get(msg, "caption") || Map.get(msg, "text"),
+          show_caption_above_media: Map.get(msg, "show_caption_above_media"),
+          video_start_timestamp: Map.get(msg, "video_start_timestamp"),
+          reply_markup: message_reply_markup(msg),
+          disable_notification: Map.get(msg, "disable_notification"),
+          protect_content: Map.get(msg, "protect_content")
+        }
+        |> Map.merge(message_reply_attrs(cid, msg, state))
+      )
     end)
   end
 
@@ -1650,16 +1654,18 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp send_rich_payload(cid, rich_message, msg, state, meta) do
     payload =
-      Delivery.build_send_rich_message(%{
-        conversation_id: cid,
-        rich_message: rich_message,
-        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
-        reply_markup: message_reply_markup(msg),
-        disable_notification: Map.get(msg, "disable_notification"),
-        protect_content: Map.get(msg, "protect_content"),
-        message_effect_id: Map.get(msg, "message_effect_id"),
-        allow_paid_broadcast: Map.get(msg, "allow_paid_broadcast")
-      })
+      Delivery.build_send_rich_message(
+        %{
+          conversation_id: cid,
+          rich_message: rich_message,
+          reply_markup: message_reply_markup(msg),
+          disable_notification: Map.get(msg, "disable_notification"),
+          protect_content: Map.get(msg, "protect_content"),
+          message_effect_id: Map.get(msg, "message_effect_id"),
+          allow_paid_broadcast: Map.get(msg, "allow_paid_broadcast")
+        }
+        |> Map.merge(message_reply_attrs(cid, msg, state))
+      )
 
     state = clear_progress(cid, state) |> throttle()
     result = dispatch_payload(payload, state, Map.get(msg, "fallback_text", ""))
@@ -1678,18 +1684,19 @@ defmodule Genswarms.Telegram.Objects.Sender do
          {:cont, state} <- prepare_delivery(from, cid, origin, state),
          {:ok, payload} <-
            safe_build_payload(fn ->
-             Delivery.build_send_media(%{
-               conversation_id: cid,
-               media_type: Map.get(msg, "media_type"),
-               media: Map.get(msg, "media") || Map.get(msg, "url"),
-               caption: Map.get(msg, "caption") || Map.get(msg, "text"),
-               reply_to_message_id:
-                 validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
-               reply_markup: message_reply_markup(msg),
-               spoiler: Map.get(msg, "spoiler"),
-               disable_notification: Map.get(msg, "disable_notification"),
-               protect_content: Map.get(msg, "protect_content")
-             })
+             Delivery.build_send_media(
+               %{
+                 conversation_id: cid,
+                 media_type: Map.get(msg, "media_type"),
+                 media: Map.get(msg, "media") || Map.get(msg, "url"),
+                 caption: Map.get(msg, "caption") || Map.get(msg, "text"),
+                 reply_markup: message_reply_markup(msg),
+                 spoiler: Map.get(msg, "spoiler"),
+                 disable_notification: Map.get(msg, "disable_notification"),
+                 protect_content: Map.get(msg, "protect_content")
+               }
+               |> Map.merge(message_reply_attrs(cid, msg, state))
+             )
            end) do
       state = clear_progress(cid, state) |> throttle()
 
@@ -1719,62 +1726,70 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp send_video_note(from, msg, state, origin) do
     send_built_payload(from, msg, state, origin, :video_note, fn cid ->
-      Delivery.build_send_video_note(%{
-        conversation_id: cid,
-        video_note: Map.get(msg, "video_note") || Map.get(msg, "media"),
-        duration: Map.get(msg, "duration"),
-        length: Map.get(msg, "length"),
-        thumbnail: Map.get(msg, "thumbnail"),
-        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
-        reply_markup: message_reply_markup(msg),
-        disable_notification: Map.get(msg, "disable_notification"),
-        protect_content: Map.get(msg, "protect_content")
-      })
+      Delivery.build_send_video_note(
+        %{
+          conversation_id: cid,
+          video_note: Map.get(msg, "video_note") || Map.get(msg, "media"),
+          duration: Map.get(msg, "duration"),
+          length: Map.get(msg, "length"),
+          thumbnail: Map.get(msg, "thumbnail"),
+          reply_markup: message_reply_markup(msg),
+          disable_notification: Map.get(msg, "disable_notification"),
+          protect_content: Map.get(msg, "protect_content")
+        }
+        |> Map.merge(message_reply_attrs(cid, msg, state))
+      )
     end)
   end
 
   defp send_live_photo(from, msg, state, origin) do
     send_built_payload(from, msg, state, origin, :live_photo, fn cid ->
-      Delivery.build_send_live_photo(%{
-        conversation_id: cid,
-        live_photo: Map.get(msg, "live_photo"),
-        photo: Map.get(msg, "photo"),
-        caption: Map.get(msg, "caption") || Map.get(msg, "text"),
-        show_caption_above_media: Map.get(msg, "show_caption_above_media"),
-        spoiler: Map.get(msg, "spoiler"),
-        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
-        reply_markup: message_reply_markup(msg),
-        disable_notification: Map.get(msg, "disable_notification"),
-        protect_content: Map.get(msg, "protect_content")
-      })
+      Delivery.build_send_live_photo(
+        %{
+          conversation_id: cid,
+          live_photo: Map.get(msg, "live_photo"),
+          photo: Map.get(msg, "photo"),
+          caption: Map.get(msg, "caption") || Map.get(msg, "text"),
+          show_caption_above_media: Map.get(msg, "show_caption_above_media"),
+          spoiler: Map.get(msg, "spoiler"),
+          reply_markup: message_reply_markup(msg),
+          disable_notification: Map.get(msg, "disable_notification"),
+          protect_content: Map.get(msg, "protect_content")
+        }
+        |> Map.merge(message_reply_attrs(cid, msg, state))
+      )
     end)
   end
 
   defp send_sticker(from, msg, state, origin) do
     send_built_payload(from, msg, state, origin, :sticker, fn cid ->
-      Delivery.build_send_sticker(%{
-        conversation_id: cid,
-        sticker: Map.get(msg, "sticker") || Map.get(msg, "media"),
-        emoji: Map.get(msg, "emoji"),
-        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
-        reply_markup: message_reply_markup(msg),
-        disable_notification: Map.get(msg, "disable_notification"),
-        protect_content: Map.get(msg, "protect_content"),
-        allow_paid_broadcast: Map.get(msg, "allow_paid_broadcast"),
-        message_effect_id: Map.get(msg, "message_effect_id")
-      })
+      Delivery.build_send_sticker(
+        %{
+          conversation_id: cid,
+          sticker: Map.get(msg, "sticker") || Map.get(msg, "media"),
+          emoji: Map.get(msg, "emoji"),
+          reply_markup: message_reply_markup(msg),
+          disable_notification: Map.get(msg, "disable_notification"),
+          protect_content: Map.get(msg, "protect_content"),
+          allow_paid_broadcast: Map.get(msg, "allow_paid_broadcast"),
+          message_effect_id: Map.get(msg, "message_effect_id")
+        }
+        |> Map.merge(message_reply_attrs(cid, msg, state))
+      )
     end)
   end
 
   defp send_media_group(from, msg, state, origin) do
     send_built_payload(from, msg, state, origin, :media_group, fn cid ->
-      Delivery.build_send_media_group(%{
-        conversation_id: cid,
-        media: Map.get(msg, "media"),
-        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
-        disable_notification: Map.get(msg, "disable_notification"),
-        protect_content: Map.get(msg, "protect_content")
-      })
+      Delivery.build_send_media_group(
+        %{
+          conversation_id: cid,
+          media: Map.get(msg, "media"),
+          disable_notification: Map.get(msg, "disable_notification"),
+          protect_content: Map.get(msg, "protect_content")
+        }
+        |> Map.merge(message_reply_attrs(cid, msg, state))
+      )
     end)
   end
 
@@ -1804,29 +1819,30 @@ defmodule Genswarms.Telegram.Objects.Sender do
            resolve_message_target(from, msg, state, state.send_sources),
          {:ok, payload} <-
            safe_build_payload(fn ->
-             Delivery.build_send_poll(%{
-               conversation_id: cid,
-               question: Map.get(msg, "question"),
-               options: Map.get(msg, "options"),
-               reply_to_message_id:
-                 validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
-               reply_markup: message_reply_markup(msg),
-               is_anonymous: Map.get(msg, "is_anonymous"),
-               allows_multiple_answers: Map.get(msg, "allows_multiple_answers"),
-               allows_revoting: Map.get(msg, "allows_revoting"),
-               shuffle_options: Map.get(msg, "shuffle_options"),
-               allow_adding_options: Map.get(msg, "allow_adding_options"),
-               hide_results_until_closes: Map.get(msg, "hide_results_until_closes"),
-               members_only: Map.get(msg, "members_only"),
-               country_codes: Map.get(msg, "country_codes"),
-               poll_type: Map.get(msg, "poll_type"),
-               correct_option_id: Map.get(msg, "correct_option_id"),
-               correct_option_ids: Map.get(msg, "correct_option_ids"),
-               explanation: Map.get(msg, "explanation"),
-               explanation_media: Map.get(msg, "explanation_media"),
-               description: Map.get(msg, "description"),
-               media: Map.get(msg, "media")
-             })
+             Delivery.build_send_poll(
+               %{
+                 conversation_id: cid,
+                 question: Map.get(msg, "question"),
+                 options: Map.get(msg, "options"),
+                 reply_markup: message_reply_markup(msg),
+                 is_anonymous: Map.get(msg, "is_anonymous"),
+                 allows_multiple_answers: Map.get(msg, "allows_multiple_answers"),
+                 allows_revoting: Map.get(msg, "allows_revoting"),
+                 shuffle_options: Map.get(msg, "shuffle_options"),
+                 allow_adding_options: Map.get(msg, "allow_adding_options"),
+                 hide_results_until_closes: Map.get(msg, "hide_results_until_closes"),
+                 members_only: Map.get(msg, "members_only"),
+                 country_codes: Map.get(msg, "country_codes"),
+                 poll_type: Map.get(msg, "poll_type"),
+                 correct_option_id: Map.get(msg, "correct_option_id"),
+                 correct_option_ids: Map.get(msg, "correct_option_ids"),
+                 explanation: Map.get(msg, "explanation"),
+                 explanation_media: Map.get(msg, "explanation_media"),
+                 description: Map.get(msg, "description"),
+                 media: Map.get(msg, "media")
+               }
+               |> Map.merge(message_reply_attrs(cid, msg, state))
+             )
            end) do
       state = throttle(state)
       result = dispatch_payload(payload, state, Map.get(msg, "question", ""))
@@ -1848,71 +1864,77 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp send_checklist(from, msg, state, origin) do
     send_built_payload(from, msg, state, origin, :checklist, fn cid ->
-      Delivery.build_send_checklist(%{
-        conversation_id: cid,
-        business_connection_id: Map.get(msg, "business_connection_id"),
-        checklist: Map.get(msg, "checklist"),
-        title: Map.get(msg, "title"),
-        tasks: Map.get(msg, "tasks"),
-        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
-        reply_markup: inline_message_reply_markup(msg),
-        disable_notification: Map.get(msg, "disable_notification"),
-        protect_content: Map.get(msg, "protect_content"),
-        message_effect_id: Map.get(msg, "message_effect_id")
-      })
+      Delivery.build_send_checklist(
+        %{
+          conversation_id: cid,
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          checklist: Map.get(msg, "checklist"),
+          title: Map.get(msg, "title"),
+          tasks: Map.get(msg, "tasks"),
+          reply_markup: inline_message_reply_markup(msg),
+          disable_notification: Map.get(msg, "disable_notification"),
+          protect_content: Map.get(msg, "protect_content"),
+          message_effect_id: Map.get(msg, "message_effect_id")
+        }
+        |> Map.merge(message_reply_attrs(cid, msg, state))
+      )
     end)
   end
 
   defp send_invoice(from, msg, state, origin) do
     send_built_payload(from, msg, state, origin, :invoice, fn cid ->
-      Delivery.build_send_invoice(%{
-        conversation_id: cid,
-        title: Map.get(msg, "title"),
-        description: Map.get(msg, "description"),
-        payload: Map.get(msg, "payload"),
-        provider_token: Map.get(msg, "provider_token"),
-        currency: Map.get(msg, "currency"),
-        prices: Map.get(msg, "prices"),
-        max_tip_amount: Map.get(msg, "max_tip_amount"),
-        suggested_tip_amounts: Map.get(msg, "suggested_tip_amounts"),
-        start_parameter: Map.get(msg, "start_parameter"),
-        provider_data: Map.get(msg, "provider_data"),
-        photo_url: Map.get(msg, "photo_url"),
-        photo_size: Map.get(msg, "photo_size"),
-        photo_width: Map.get(msg, "photo_width"),
-        photo_height: Map.get(msg, "photo_height"),
-        need_name: Map.get(msg, "need_name"),
-        need_phone_number: Map.get(msg, "need_phone_number"),
-        need_email: Map.get(msg, "need_email"),
-        need_shipping_address: Map.get(msg, "need_shipping_address"),
-        send_phone_number_to_provider: Map.get(msg, "send_phone_number_to_provider"),
-        send_email_to_provider: Map.get(msg, "send_email_to_provider"),
-        is_flexible: Map.get(msg, "is_flexible"),
-        direct_messages_topic_id: Map.get(msg, "direct_messages_topic_id"),
-        suggested_post_parameters: Map.get(msg, "suggested_post_parameters"),
-        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
-        reply_markup: inline_message_reply_markup(msg),
-        disable_notification: Map.get(msg, "disable_notification"),
-        protect_content: Map.get(msg, "protect_content"),
-        allow_paid_broadcast: Map.get(msg, "allow_paid_broadcast"),
-        message_effect_id: Map.get(msg, "message_effect_id")
-      })
+      Delivery.build_send_invoice(
+        %{
+          conversation_id: cid,
+          title: Map.get(msg, "title"),
+          description: Map.get(msg, "description"),
+          payload: Map.get(msg, "payload"),
+          provider_token: Map.get(msg, "provider_token"),
+          currency: Map.get(msg, "currency"),
+          prices: Map.get(msg, "prices"),
+          max_tip_amount: Map.get(msg, "max_tip_amount"),
+          suggested_tip_amounts: Map.get(msg, "suggested_tip_amounts"),
+          start_parameter: Map.get(msg, "start_parameter"),
+          provider_data: Map.get(msg, "provider_data"),
+          photo_url: Map.get(msg, "photo_url"),
+          photo_size: Map.get(msg, "photo_size"),
+          photo_width: Map.get(msg, "photo_width"),
+          photo_height: Map.get(msg, "photo_height"),
+          need_name: Map.get(msg, "need_name"),
+          need_phone_number: Map.get(msg, "need_phone_number"),
+          need_email: Map.get(msg, "need_email"),
+          need_shipping_address: Map.get(msg, "need_shipping_address"),
+          send_phone_number_to_provider: Map.get(msg, "send_phone_number_to_provider"),
+          send_email_to_provider: Map.get(msg, "send_email_to_provider"),
+          is_flexible: Map.get(msg, "is_flexible"),
+          direct_messages_topic_id: Map.get(msg, "direct_messages_topic_id"),
+          suggested_post_parameters: Map.get(msg, "suggested_post_parameters"),
+          reply_markup: inline_message_reply_markup(msg),
+          disable_notification: Map.get(msg, "disable_notification"),
+          protect_content: Map.get(msg, "protect_content"),
+          allow_paid_broadcast: Map.get(msg, "allow_paid_broadcast"),
+          message_effect_id: Map.get(msg, "message_effect_id")
+        }
+        |> Map.merge(message_reply_attrs(cid, msg, state))
+      )
     end)
   end
 
   defp send_game(from, msg, state, origin) do
     send_built_payload(from, msg, state, origin, :game, fn cid ->
-      Delivery.build_send_game(%{
-        conversation_id: cid,
-        business_connection_id: Map.get(msg, "business_connection_id"),
-        game_short_name: Map.get(msg, "game_short_name"),
-        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
-        reply_markup: inline_message_reply_markup(msg),
-        disable_notification: Map.get(msg, "disable_notification"),
-        protect_content: Map.get(msg, "protect_content"),
-        allow_paid_broadcast: Map.get(msg, "allow_paid_broadcast"),
-        message_effect_id: Map.get(msg, "message_effect_id")
-      })
+      Delivery.build_send_game(
+        %{
+          conversation_id: cid,
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          game_short_name: Map.get(msg, "game_short_name"),
+          reply_markup: inline_message_reply_markup(msg),
+          disable_notification: Map.get(msg, "disable_notification"),
+          protect_content: Map.get(msg, "protect_content"),
+          allow_paid_broadcast: Map.get(msg, "allow_paid_broadcast"),
+          message_effect_id: Map.get(msg, "message_effect_id")
+        }
+        |> Map.merge(message_reply_attrs(cid, msg, state))
+      )
     end)
   end
 
@@ -1957,14 +1979,16 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp send_dice(from, msg, state, origin) do
     send_built_payload(from, msg, state, origin, :dice, fn cid ->
-      Delivery.build_send_dice(%{
-        conversation_id: cid,
-        emoji: Map.get(msg, "emoji"),
-        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
-        reply_markup: message_reply_markup(msg),
-        disable_notification: Map.get(msg, "disable_notification"),
-        protect_content: Map.get(msg, "protect_content")
-      })
+      Delivery.build_send_dice(
+        %{
+          conversation_id: cid,
+          emoji: Map.get(msg, "emoji"),
+          reply_markup: message_reply_markup(msg),
+          disable_notification: Map.get(msg, "disable_notification"),
+          protect_content: Map.get(msg, "protect_content")
+        }
+        |> Map.merge(message_reply_attrs(cid, msg, state))
+      )
     end)
   end
 
@@ -2485,12 +2509,11 @@ defmodule Genswarms.Telegram.Objects.Sender do
         attrs
         |> Map.merge(%{
           conversation_id: cid,
-          reply_to_message_id:
-            validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
           reply_markup: message_reply_markup(msg),
           disable_notification: Map.get(msg, "disable_notification"),
           protect_content: Map.get(msg, "protect_content")
         })
+        |> Map.merge(message_reply_attrs(cid, msg, state))
 
       case safe_build_payload(fn ->
              case kind do
@@ -3744,6 +3767,21 @@ defmodule Genswarms.Telegram.Objects.Sender do
   end
 
   defp card_buttons(msg), do: Map.get(msg, "buttons")
+
+  defp message_reply_attrs(cid, msg, state) do
+    cid
+    |> validate_reply_tag(Map.get(msg, "reply_to_message_id"), state)
+    |> reply_attrs(msg)
+  end
+
+  defp reply_attrs(reply_to_message_id, msg) do
+    %{
+      reply_to_message_id: reply_to_message_id,
+      quote: Map.get(msg, "quote"),
+      quote_position: Map.get(msg, "quote_position"),
+      quote_parse_mode: Map.get(msg, "quote_parse_mode")
+    }
+  end
 
   defp message_reply_markup(msg) do
     Buttons.normalize_reply_markup(Map.get(msg, "reply_markup")) ||

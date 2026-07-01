@@ -3418,17 +3418,56 @@ defmodule Genswarms.Telegram.Delivery do
     end
   end
 
-  defp reply_parameters(%{reply_to_message_id: id}) when is_integer(id),
-    do: %{message_id: id, allow_sending_without_reply: true}
+  defp reply_parameters(%{reply_to_message_id: id} = attrs) when is_integer(id),
+    do: build_reply_parameters(id, attrs)
 
-  defp reply_parameters(%{reply_to_message_id: id}) when is_binary(id) do
+  defp reply_parameters(%{reply_to_message_id: id} = attrs) when is_binary(id) do
     case Integer.parse(id) do
-      {n, ""} -> %{message_id: n, allow_sending_without_reply: true}
+      {n, ""} -> build_reply_parameters(n, attrs)
+      _ -> nil
+    end
+  end
+
+  defp reply_parameters(%{"reply_to_message_id" => id} = attrs) when is_integer(id),
+    do: build_reply_parameters(id, attrs)
+
+  defp reply_parameters(%{"reply_to_message_id" => id} = attrs) when is_binary(id) do
+    case Integer.parse(id) do
+      {n, ""} -> build_reply_parameters(n, attrs)
       _ -> nil
     end
   end
 
   defp reply_parameters(_), do: nil
+
+  defp build_reply_parameters(message_id, attrs) do
+    %{message_id: message_id, allow_sending_without_reply: true}
+    |> maybe_put_reply_quote(attrs)
+  end
+
+  defp maybe_put_reply_quote(params, attrs) do
+    case option(attrs, :quote) do
+      quote when is_binary(quote) ->
+        params
+        |> Map.put(:quote, quote)
+        |> maybe_put(:quote_position, normalize_optional_integer(option(attrs, :quote_position)))
+        |> maybe_put(:quote_parse_mode, option(attrs, :quote_parse_mode))
+
+      _other ->
+        params
+    end
+  end
+
+  defp normalize_optional_integer(value) when is_integer(value), do: value
+
+  defp normalize_optional_integer(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {n, ""} -> n
+      _ -> nil
+    end
+  end
+
+  defp normalize_optional_integer(_value), do: nil
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
