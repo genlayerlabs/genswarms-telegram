@@ -62,6 +62,20 @@ defmodule Genswarms.Telegram.ClientStoreMemoryTest do
                403,
                ~s({"ok":false,"error_code":403,"description":"bot was blocked by the user"})
              )
+
+    assert {:error, {:dead_chat, 400, _}} =
+             Client.classify_response(
+               400,
+               ~s({"ok":false,"error_code":400,"description":"Bad Request: chat not found"})
+             )
+
+    assert {:error, {:transient, 503, _}} =
+             Client.classify_response(
+               200,
+               ~s({"ok":false,"error_code":503,"description":"Service Unavailable"})
+             )
+
+    assert {:ok, %{"ok" => true}} = Client.classify_response(200, ~s({"ok":true}))
   end
 
   test "curl client keeps token out of argv, removes temp files, and redacts failures", %{

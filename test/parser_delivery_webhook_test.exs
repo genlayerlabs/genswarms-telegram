@@ -91,6 +91,9 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
 
     assert ["aa", "a"] = Delivery.chunk_text("aaa", 2)
     assert ["😀", "😀"] = Delivery.chunk_text("😀😀", 2)
+    assert ["aaa\n", "bb"] = Delivery.chunk_text("aaa\nbb", 4)
+    assert Delivery.chunk_text("\nleading", 4) |> Enum.join() == "\nleading"
+    assert Delivery.chunk_text("trailing\n", 4) |> Enum.join() == "trailing\n"
   end
 
   test "webhook verifies Telegram secret and parses update" do

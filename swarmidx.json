@@ -5,41 +5,9 @@
   "packages": [
     {
       "name": "genswarms-telegram",
-      "version": "0.1.0",
-      "ref": "genlayerlabs/genswarms-telegram@0.1.0",
       "dir": ".",
       "kind": "handler",
-      "description": "Reusable Telegram transport and GenSwarms object handlers",
-      "exports": {
-        "objects": [
-          "Genswarms.Telegram.Objects.Ingress",
-          "Genswarms.Telegram.Objects.Sender"
-        ],
-        "helpers": [
-          "Genswarms.Telegram.Client",
-          "Genswarms.Telegram.Client.Curl",
-          "Genswarms.Telegram.Client.Fake",
-          "Genswarms.Telegram.BotRef",
-          "Genswarms.Telegram.CommandRouter",
-          "Genswarms.Telegram.CommandRouter.Basic",
-          "Genswarms.Telegram.Context",
-          "Genswarms.Telegram.Poller",
-          "Genswarms.Telegram.Parser",
-          "Genswarms.Telegram.Delivery",
-          "Genswarms.Telegram.DeliveryEffects",
-          "Genswarms.Telegram.DeliveryEffects.Noop",
-          "Genswarms.Telegram.Format",
-          "Genswarms.Telegram.ConversationId",
-          "Genswarms.Telegram.IdentitySink",
-          "Genswarms.Telegram.IdentitySink.Noop",
-          "Genswarms.Telegram.SessionRuntime",
-          "Genswarms.Telegram.SessionRuntime.Default",
-          "Genswarms.Telegram.Context.MemoryMd",
-          "Genswarms.Telegram.Store",
-          "Genswarms.Telegram.Store.File",
-          "Genswarms.Telegram.Webhook"
-        ]
-      }
+      "description": "Reusable Telegram transport and GenSwarms object handlers"
     }
   ]
 }

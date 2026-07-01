@@ -13,7 +13,8 @@ defmodule Genswarms.Telegram.Delivery do
     base = %{
       chat_id: ConversationId.chat_id(cid),
       text: Format.to_html(text),
-      parse_mode: "HTML"
+      parse_mode: "HTML",
+      disable_web_page_preview: true
     }
 
     base
@@ -47,18 +48,7 @@ defmodule Genswarms.Telegram.Delivery do
   def chunk_text(text, limit \\ @telegram_text_limit) do
     text
     |> to_string()
-    |> String.graphemes()
-    |> Enum.reduce([""], fn grapheme, [current | rest] ->
-      candidate = current <> grapheme
-
-      if utf16_units(candidate) <= limit do
-        [candidate | rest]
-      else
-        [grapheme, current | rest]
-      end
-    end)
-    |> Enum.reverse()
-    |> Enum.reject(&(&1 == ""))
+    |> line_aware_chunks(limit)
   end
 
   def utf16_units(text) do
@@ -67,6 +57,90 @@ defmodule Genswarms.Telegram.Delivery do
     |> byte_size()
     |> div(2)
   end
+
+  defp line_aware_chunks(text, limit) do
+    if utf16_units(text) <= limit do
+      [text]
+    else
+      text
+      |> line_tokens(limit)
+      |> pack_tokens(limit)
+    end
+  end
+
+  defp line_tokens(text, limit) do
+    lines = String.split(text, "\n", trim: false)
+    last_index = length(lines) - 1
+
+    lines
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {line, index} ->
+      suffix = if index < last_index, do: "\n", else: ""
+      parts = split_long_line(line, limit)
+      attach_line_suffix(parts, suffix, limit)
+    end)
+  end
+
+  defp attach_line_suffix(parts, "", _limit), do: parts
+
+  defp attach_line_suffix(parts, suffix, limit) do
+    {last, head} = List.pop_at(parts, -1)
+    last = last || ""
+
+    if utf16_units(last <> suffix) <= limit do
+      head ++ [last <> suffix]
+    else
+      head ++ [last, suffix]
+    end
+  end
+
+  defp split_long_line(line, limit) do
+    if utf16_units(line) <= limit, do: [line], else: hard_split(String.graphemes(line), limit)
+  end
+
+  defp hard_split(graphemes, limit) do
+    {chunks, cur, _len} =
+      Enum.reduce(graphemes, {[], [], 0}, fn grapheme, {chunks, cur, len} ->
+        gl = utf16_units(grapheme)
+
+        if cur != [] and len + gl > limit do
+          {[join_rev(cur) | chunks], [grapheme], gl}
+        else
+          {chunks, [grapheme | cur], len + gl}
+        end
+      end)
+
+    [join_rev(cur) | chunks]
+    |> Enum.reverse()
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp pack_tokens(tokens, limit) do
+    {chunks, cur} =
+      Enum.reduce(tokens, {[], ""}, fn token, {chunks, cur} ->
+        candidate = cur <> token
+
+        cond do
+          token == "" ->
+            {chunks, cur}
+
+          cur == "" ->
+            {chunks, token}
+
+          utf16_units(candidate) <= limit ->
+            {chunks, candidate}
+
+          true ->
+            {[cur | chunks], token}
+        end
+      end)
+
+    [cur | chunks]
+    |> Enum.reverse()
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp join_rev(cur), do: cur |> Enum.reverse() |> Enum.join()
 
   def reply_markup(nil), do: nil
   def reply_markup([]), do: nil

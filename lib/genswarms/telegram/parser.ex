@@ -93,14 +93,19 @@ defmodule Genswarms.Telegram.Parser do
   defp identity(nil), do: %{}
 
   defp identity(from) when is_map(from) do
+    username = Map.get(from, "username")
+
     %{
       user_id: Map.get(from, "id"),
       is_bot: Map.get(from, "is_bot"),
       first_name: Map.get(from, "first_name"),
       last_name: Map.get(from, "last_name"),
-      username: Map.get(from, "username"),
+      username: username,
+      handle: username,
       language_code: Map.get(from, "language_code"),
-      is_premium: Map.get(from, "is_premium")
+      language: Map.get(from, "language_code"),
+      is_premium: Map.get(from, "is_premium"),
+      premium: Map.get(from, "is_premium")
     }
     |> Enum.reject(fn {_k, v} -> is_nil(v) end)
     |> Map.new()

@@ -68,6 +68,9 @@ defmodule Genswarms.Telegram.Client do
   defp classify_decoded(status, %{"ok" => true, "result" => result}) when status in 200..299,
     do: {:ok, result}
 
+  defp classify_decoded(status, %{"ok" => true} = body) when status in 200..299,
+    do: {:ok, Map.get(body, "result", body)}
+
   defp classify_decoded(_status, %{"ok" => false, "error_code" => 429} = body) do
     retry_after = get_in(body, ["parameters", "retry_after"]) || 1
     {:error, {:rate_limited, retry_after, Map.get(body, "description", "")}}
@@ -78,17 +81,20 @@ defmodule Genswarms.Telegram.Client do
     description = Map.get(body, "description", "")
 
     cond do
-      String.contains?(String.downcase(description), "can't parse") ->
+      parse_error_description?(description) ->
         {:error, {:parse_error, description}}
 
-      String.contains?(String.downcase(description), "bot was blocked") or
-          String.contains?(String.downcase(description), "chat not found") ->
+      dead_chat_description?(description) ->
         {:error, {:dead_chat, code, description}}
 
       true ->
         {:error, {:failed, code, description}}
     end
   end
+
+  defp classify_decoded(_status, %{"ok" => false, "error_code" => code} = body)
+       when is_integer(code) and code >= 500,
+       do: {:error, {:transient, code, Map.get(body, "description", "")}}
 
   defp classify_decoded(status, %{"ok" => false} = body) when status >= 500,
     do: {:error, {:transient, status, Map.get(body, "description", "")}}
@@ -98,4 +104,27 @@ defmodule Genswarms.Telegram.Client do
 
   defp classify_decoded(status, body) when status >= 500, do: {:error, {:transient, status, body}}
   defp classify_decoded(status, body), do: {:error, {:unexpected_response, status, body}}
+
+  @dead_chat_markers [
+    "bot was blocked",
+    "chat not found",
+    "user is deactivated",
+    "bot was kicked",
+    "peer_id_invalid",
+    "group chat was upgraded",
+    "chat was deleted"
+  ]
+
+  @doc "True when a Telegram error description names a permanently dead recipient."
+  def dead_chat_description?(description) when is_binary(description) do
+    down = String.downcase(description)
+    Enum.any?(@dead_chat_markers, &String.contains?(down, &1))
+  end
+
+  def dead_chat_description?(_), do: false
+
+  defp parse_error_description?(description) do
+    down = String.downcase(to_string(description))
+    String.contains?(down, "parse") or String.contains?(down, "entities")
+  end
 end

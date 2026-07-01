@@ -281,6 +281,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   defp next_update_offset(_update, offset), do: offset
 
   defp mark_processed({:error, _reason, _state} = result, _current_state, _update_id), do: result
+  defp mark_processed(result, _state, update_id) when not is_integer(update_id), do: result
 
   defp mark_processed(result, state, update_id) do
     case state.store.mark_update_seen(state.bot_ref, update_id) do
