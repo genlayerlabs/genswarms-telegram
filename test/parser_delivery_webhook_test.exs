@@ -160,5 +160,16 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
     assert {:ok, ^update} = Webhook.decode_update(body, headers, secret_token: "secret")
     assert {:ok, %{type: :text}} = Webhook.parse(body, headers, secret_token: "secret")
     assert {:error, :invalid_secret_token} = Webhook.parse(body, [], secret_token: "secret")
+    assert :ok = Webhook.verify_secret(%{}, nil)
+    assert :ok = Webhook.verify_secret(%{}, "")
+
+    assert :ok =
+             Webhook.verify_secret(
+               %{"X-Telegram-Bot-Api-Secret-Token" => "secret"},
+               "secret"
+             )
+
+    assert {:error, {:bad_json, %Jason.DecodeError{}}} =
+             Webhook.decode_update("{bad", headers, secret_token: "secret")
   end
 end

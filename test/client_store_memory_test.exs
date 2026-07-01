@@ -3,9 +3,13 @@ defmodule Genswarms.Telegram.ClientStoreMemoryTest do
 
   alias Genswarms.Telegram.Client
   alias Genswarms.Telegram.Client.{Curl, Fake}
-  alias Genswarms.Telegram.Store.File, as: FileStore
   alias Genswarms.Telegram.Context.MemoryMd
+  alias Genswarms.Telegram.DeliveryEffects
+  alias Genswarms.Telegram.IdentitySink
+  alias Genswarms.Telegram.InboundEffects
+  alias Genswarms.Telegram.OffsetFile
   alias Genswarms.Telegram.Poller
+  alias Genswarms.Telegram.Store.File, as: FileStore
   alias Genswarms.Telegram.SessionRuntime.Default, as: DefaultRuntime
 
   defmodule Elixir.Genswarms.Objects.ObjectServer do
@@ -25,6 +29,34 @@ defmodule Genswarms.Telegram.ClientStoreMemoryTest do
       )
 
       :idle
+    end
+  end
+
+  defmodule Elixir.Genswarms.SwarmManager do
+    def add_agent(swarm_name, spec, route_opts) do
+      if parent = Process.get(:genswarms_telegram_test_parent) do
+        send(parent, {:swarm_add_agent, swarm_name, spec, route_opts})
+      end
+
+      Process.get(:genswarms_telegram_add_agent_return, {:ok, spec})
+    end
+
+    def remove_agent(swarm_name, slot) do
+      if parent = Process.get(:genswarms_telegram_test_parent) do
+        send(parent, {:swarm_remove_agent, swarm_name, slot})
+      end
+
+      Process.get(:genswarms_telegram_remove_agent_return, :ok)
+    end
+  end
+
+  defmodule Elixir.Genswarms.Agents.AgentServer do
+    def send_task(swarm_name, slot, text) do
+      if parent = Process.get(:genswarms_telegram_test_parent) do
+        send(parent, {:agent_send_task, swarm_name, slot, text})
+      end
+
+      Process.get(:genswarms_telegram_send_task_return, {:ok, :sent})
     end
   end
 
@@ -171,6 +203,66 @@ defmodule Genswarms.Telegram.ClientStoreMemoryTest do
     assert FileStore.read_offset("bot-a") == 7
   end
 
+  test "poller reports malformed or failed getUpdates responses without advancing offsets" do
+    {:ok, fake} =
+      Fake.start_link([
+        {:ok, %{"not" => "a list"}},
+        {:error, {:transient, 502, "bad gateway"}}
+      ])
+
+    assert {:error, {:bad_updates_result, %{"not" => "a list"}}} =
+             Poller.fetch_updates(Fake, FileStore, "bot-poller",
+               client_opts: [fake: fake, token: "token"],
+               allowed_updates: ["message", "callback_query"],
+               timeout_s: 9
+             )
+
+    assert {:error, {:transient, 502, "bad gateway"}} =
+             Poller.fetch_updates(Fake, FileStore, "bot-poller",
+               client_opts: [fake: fake, token: "token"]
+             )
+
+    [bad_call, error_call] = Fake.calls(fake)
+    assert bad_call.payload.allowed_updates == ["message", "callback_query"]
+    assert bad_call.payload.timeout == 9
+    assert error_call.payload.offset == 0
+    assert FileStore.read_offset("bot-poller") == 0
+
+    assert Poller.next_offset(4, [%{"update_id" => "bad"}, %{"update_id" => 8}]) == 9
+    assert Poller.next_offset(4, [%{"update_id" => "bad"}]) == 4
+  end
+
+  test "offset file helper namespaces token paths and treats invalid files as zero", %{dir: dir} do
+    base = Path.join(dir, "offset")
+
+    assert OffsetFile.path(nil, "token") == nil
+    assert OffsetFile.path(base, nil) == base
+    assert OffsetFile.path(base, "") == base
+
+    tagged_path = OffsetFile.path(base, "123:SECRET")
+    assert tagged_path =~ base <> "."
+    refute tagged_path =~ "SECRET"
+    assert String.ends_with?(tagged_path, OffsetFile.token_tag("123:SECRET"))
+
+    assert OffsetFile.read(nil) == 0
+    assert OffsetFile.read(Path.join(dir, "missing")) == 0
+
+    File.write!(tagged_path, " 42\n")
+    assert OffsetFile.read(tagged_path) == 42
+
+    File.write!(tagged_path, "-1")
+    assert OffsetFile.read(tagged_path) == 0
+
+    File.write!(tagged_path, "not-an-int")
+    assert OffsetFile.read(tagged_path) == 0
+
+    assert :ok = OffsetFile.write(tagged_path, 99)
+    assert OffsetFile.read(tagged_path) == 99
+    assert :ok = OffsetFile.write(tagged_path, -1)
+    assert OffsetFile.read(tagged_path) == 99
+    assert :ok = OffsetFile.write(nil, 100)
+  end
+
   test "file store namespaces offsets and dedupe by bot ref" do
     assert FileStore.read_offset("bot-a") == 0
     assert :ok = FileStore.write_offset("bot-a", 42)
@@ -219,6 +311,51 @@ defmodule Genswarms.Telegram.ClientStoreMemoryTest do
     refute File.exists?(MemoryMd.memory_path("bot-a", cid))
   end
 
+  test "memory md trims large histories and sanitizes multiline turns", %{dir: dir} do
+    workspace = Path.join(dir, "memory-workspace")
+    cid = "tg:trim:0"
+
+    assert :ok = MemoryMd.init_session("bot-trim", cid, %{workspace: workspace})
+    assert File.exists?(Path.join(workspace, "MEMORY.md"))
+
+    assert :ok =
+             MemoryMd.after_turn(
+               "bot-trim",
+               cid,
+               :assistant,
+               "line 1\r\nline 2\n" <> String.duplicate("x", 2_500),
+               %{max_bytes: 120}
+             )
+
+    body = File.read!(MemoryMd.memory_path("bot-trim", cid))
+    assert byte_size(body) <= 130
+    refute body =~ "\r"
+    refute body =~ "line 1\nline 2"
+
+    assert byte_size(MemoryMd.before_turn("bot-trim", cid, "", %{max_bytes: 50})) <= 50
+  end
+
+  test "noop effect adapters preserve contract defaults" do
+    assert DeliveryEffects.Noop.before_send(%{}) == :ok
+    assert DeliveryEffects.Noop.after_send(%{}, {:ok, true}) == :ok
+    assert DeliveryEffects.Noop.delivery_failed(%{}, :boom) == :ok
+    assert DeliveryEffects.Noop.redact_outbound("hello", %{}) == "hello"
+    assert DeliveryEffects.Noop.after_delivery(%{}, %{ok: true}, %{}) == :ok
+    assert DeliveryEffects.Noop.on_unreachable("tg:1:0", :blocked, %{}) == :ok
+
+    assert IdentitySink.Noop.upsert_identity("bot", "tg:1:0", %{}) == :ok
+    assert IdentitySink.Noop.mark_reachable("bot", "tg:1:0", %{}) == :ok
+    assert IdentitySink.Noop.mark_unreachable("bot", "tg:1:0", :blocked) == :ok
+
+    assert InboundEffects.Noop.init([]) == {:ok, %{}}
+    assert InboundEffects.Noop.before_route(%{id: 1}, %{}, %{seen: 1}) ==
+             {:cont, %{id: 1}, %{seen: 1}}
+
+    assert InboundEffects.Noop.on_non_text(%{}, %{}, %{seen: 1}) == {:ok, %{seen: 1}}
+    assert InboundEffects.Noop.on_skipped(%{}, :duplicate, %{}, %{seen: 1}) == {:ok, %{seen: 1}}
+    assert InboundEffects.Noop.after_routed(%{}, :ok, %{}, %{seen: 1}) == {:ok, %{seen: 1}}
+  end
+
   test "default session runtime confines bot refs and preserves workspace by default", %{dir: dir} do
     root = Path.join(dir, "workspaces")
 
@@ -244,6 +381,54 @@ defmodule Genswarms.Telegram.ClientStoreMemoryTest do
 
     assert session2.workspace == session.workspace
     assert File.read!(marker) == "kept"
+  end
+
+  test "default session runtime supports slot workspaces, patterns, injected delivery, and teardown",
+       %{dir: dir} do
+    root = Path.join(dir, "runtime-shapes")
+
+    assert DefaultRuntime.workspace_root(%{workspace_root: root}) == root
+
+    opts = %{
+      bot_ref: "bot-a",
+      workspace_root: root,
+      workspace_by: :slot,
+      pool_size: 1,
+      slot_prefix: "agent/slash",
+      extra_env: %{"STATIC" => "1"},
+      conversation_env: "CID"
+    }
+
+    assert {:ok, session} = DefaultRuntime.ensure_session("tg:123:0", opts)
+    assert session.slot == :agent_slash_0
+    assert session.workspace == Path.join(root, "agent_slash_0")
+    assert session.env == %{"STATIC" => "1", "CID" => "tg:123:0"}
+
+    assert {:delivered, :agent_slash_0, "hello"} =
+             DefaultRuntime.deliver_to_session(session, "hello", %{
+               deliver: fn delivered_session, text ->
+                 {:delivered, delivered_session.slot, text}
+               end
+             })
+
+    assert :ok =
+             DefaultRuntime.teardown_session(
+               session,
+               :normal,
+               Map.put(opts, :wipe_workspace, true)
+             )
+
+    refute File.exists?(session.workspace)
+
+    pattern_opts = %{
+      bot_ref: "bot-a",
+      workspace_root: root,
+      workspace_pattern: Path.join(root, "{bot_ref}/{slot}/{conversation_id}")
+    }
+
+    assert {:ok, patterned} = DefaultRuntime.ensure_session("tg:1:7", pattern_opts)
+    assert patterned.workspace =~ "/bot-a/telegram_agent_"
+    refute patterned.workspace =~ "tg:1:7"
   end
 
   test "default session runtime uses a bounded opaque slot pool", %{dir: dir} do
@@ -293,6 +478,207 @@ defmodule Genswarms.Telegram.ClientStoreMemoryTest do
                     [:telegram_sender]}
   end
 
+  test "default session runtime spawns GenSwarms agents with session backend and route opts",
+       %{dir: dir} do
+    Process.put(:genswarms_telegram_test_parent, self())
+    root = Path.join(dir, "spawn-workspaces")
+
+    opts = %{
+      bot_ref: "bot-a",
+      workspace_root: root,
+      slot_prefix: "telegram/agent",
+      pool_size: 2,
+      swarm_name: "telegram-test",
+      binding_sinks: [:telegram_sender],
+      extra_env: %{"HOST_ENV" => "1"},
+      conversation_env: "CID",
+      agent_template: %{
+        "backend" => {:bwrap, %{extra_env: %{"TEMPLATE_ENV" => "1"}}},
+        "skills" => [:telegram_skill],
+        "connections" => [:template_sender],
+        "incoming" => [:template_incoming],
+        "persist" => true,
+        role: :assistant
+      }
+    }
+
+    assert {:ok, session} = DefaultRuntime.ensure_session("tg:spawn:0", opts)
+
+    assert_receive {:swarm_add_agent, "telegram-test", spec, route_opts}
+
+    assert spec.name == session.slot
+    assert spec.skills == [:telegram_skill]
+    assert spec.role == :assistant
+    refute Map.has_key?(spec, "connections")
+    refute Map.has_key?(spec, "incoming")
+    refute Map.has_key?(spec, "persist")
+
+    assert {:bwrap, backend_opts} = spec.backend
+    assert backend_opts.workspace == session.workspace
+    assert backend_opts.extra_env == %{
+             "TEMPLATE_ENV" => "1",
+             "HOST_ENV" => "1",
+             "CID" => "tg:spawn:0"
+           }
+
+    assert route_opts == [
+             connections: [:template_sender],
+             incoming: [:template_incoming],
+             persist: true
+           ]
+  after
+    Process.delete(:genswarms_telegram_test_parent)
+  end
+
+  test "default session runtime evicts old GenSwarms agents before reusing a full slot pool",
+       %{dir: dir} do
+    Process.put(:genswarms_telegram_test_parent, self())
+    root = Path.join(dir, "evict-spawn-workspaces")
+
+    opts = %{
+      bot_ref: "bot-a",
+      workspace_root: root,
+      pool_size: 1,
+      swarm_name: "telegram-test",
+      binding_sinks: [:fallback_sender],
+      agent_template: %{
+        backend: :local,
+        incoming: [],
+        persist: false
+      }
+    }
+
+    assert {:ok, first} = DefaultRuntime.ensure_session("tg:first:0", opts)
+    assert_receive {:swarm_add_agent, "telegram-test", %{name: first_slot}, first_route_opts}
+    assert first_slot == first.slot
+    assert first_route_opts[:connections] == [:fallback_sender]
+
+    assert {:ok, second} = DefaultRuntime.ensure_session("tg:second:0", opts)
+    assert second.slot == first.slot
+    assert second.evicted == %{conversation_id: "tg:first:0", slot: first.slot}
+    assert_receive {:swarm_remove_agent, "telegram-test", first_slot}
+    assert_receive {:swarm_add_agent, "telegram-test", %{name: ^first_slot}, _route_opts}
+  after
+    Process.delete(:genswarms_telegram_test_parent)
+  end
+
+  test "default session runtime reports invalid spawn configuration and add_agent failures",
+       %{dir: dir} do
+    root = Path.join(dir, "spawn-errors")
+
+    base_opts = %{
+      bot_ref: "bot-a",
+      workspace_root: root,
+      pool_size: 4
+    }
+
+    assert {:error, :missing_swarm_name} =
+             DefaultRuntime.ensure_session(
+               "tg:no-swarm:0",
+               Map.put(base_opts, :agent_template, %{backend: :local})
+             )
+
+    assert {:error, :invalid_agent_template} =
+             DefaultRuntime.ensure_session(
+               "tg:bad-template:0",
+               base_opts
+               |> Map.put(:swarm_name, "telegram-test")
+               |> Map.put(:agent_template, "not-a-template")
+             )
+
+    Process.put(:genswarms_telegram_add_agent_return, {:error, :boom})
+
+    assert {:error, :boom} =
+             DefaultRuntime.ensure_session(
+               "tg:add-fails:0",
+               base_opts
+               |> Map.put(:swarm_name, "telegram-test")
+               |> Map.put(:agent_template, %{backend: :local})
+             )
+
+    Process.put(:genswarms_telegram_add_agent_return, {:error, {:already_started, self()}})
+
+    assert {:ok, _session} =
+             DefaultRuntime.ensure_session(
+               "tg:already-started:0",
+               base_opts
+               |> Map.put(:swarm_name, "telegram-test")
+               |> Map.put(:agent_template, %{backend: :local})
+             )
+  after
+    Process.delete(:genswarms_telegram_add_agent_return)
+  end
+
+  test "default session runtime delivers through GenSwarms agent server when configured" do
+    Process.put(:genswarms_telegram_test_parent, self())
+    session = %{slot: :telegram_agent_0, conversation_id: "tg:deliver:0"}
+
+    assert {:ok, :sent} =
+             DefaultRuntime.deliver_to_session(session, "hello", %{swarm_name: "telegram-test"})
+
+    assert_receive {:agent_send_task, "telegram-test", :telegram_agent_0, "hello"}
+
+    assert {:error, :no_delivery_adapter} =
+             DefaultRuntime.deliver_to_session(session, "hello", %{swarm_name: nil})
+  after
+    Process.delete(:genswarms_telegram_test_parent)
+  end
+
+  test "default session runtime shapes docker and custom backends with session context",
+       %{dir: dir} do
+    Process.put(:genswarms_telegram_test_parent, self())
+    root = Path.join(dir, "backend-shapes")
+
+    docker_opts = %{
+      bot_ref: "bot-a",
+      workspace_root: root,
+      swarm_name: "telegram-test",
+      extra_env: %{"HOST_ENV" => "1"},
+      agent_template: %{
+        backend: {:docker, "telegram-agent:latest", %{env: %{"IMAGE_ENV" => "1"}}}
+      }
+    }
+
+    assert {:ok, docker_session} = DefaultRuntime.ensure_session("tg:docker:0", docker_opts)
+    assert_receive {:swarm_add_agent, "telegram-test", docker_spec, _route_opts}
+    assert {:docker, "telegram-agent:latest", docker_backend_opts} = docker_spec.backend
+    assert docker_backend_opts.workspace == docker_session.workspace
+    assert docker_backend_opts.env["IMAGE_ENV"] == "1"
+    assert docker_backend_opts.env["HOST_ENV"] == "1"
+    assert docker_backend_opts.env["GENSWARMS_TELEGRAM_CONVERSATION_ID"] == "tg:docker:0"
+
+    custom_opts = %{
+      bot_ref: "bot-a",
+      workspace_root: root,
+      swarm_name: "telegram-test",
+      agent_template: %{backend: {:remote, :pool_a}}
+    }
+
+    assert {:ok, _custom_session} = DefaultRuntime.ensure_session("tg:custom:0", custom_opts)
+    assert_receive {:swarm_add_agent, "telegram-test", %{backend: {:remote, :pool_a}}, _}
+  after
+    Process.delete(:genswarms_telegram_test_parent)
+  end
+
+  test "default session runtime handles nil templates and non-session teardown", %{dir: dir} do
+    root = Path.join(dir, "nil-template")
+
+    assert {:ok, session} =
+             DefaultRuntime.ensure_session("tg:nil-template:0", %{
+               bot_ref: "bot-a",
+               workspace_root: root,
+               agent_template: nil
+             })
+
+    assert session.slot == :telegram_agent_0
+    assert :ok =
+             DefaultRuntime.teardown_session(%{}, :normal, %{
+               workspace_root: root,
+               wipe_workspace: false
+             })
+    assert String.ends_with?(DefaultRuntime.workspace_root(), "genswarms-telegram")
+  end
+
   test "default session runtime does not require a binding adapter for injected delivery" do
     session = %{slot: :telegram_agent_0, conversation_id: "tg:1:0"}
     opts = %{deliver: fn _session, _text -> :ok end}
@@ -333,6 +719,18 @@ defmodule Genswarms.Telegram.ClientStoreMemoryTest do
     assert_receive {:object_barrier, "telegram-test", :custom_sender}
   after
     Process.delete(:genswarms_telegram_test_parent)
+  end
+
+  test "default session runtime reports missing GenSwarms delivery configuration" do
+    session = %{slot: :telegram_agent_0, conversation_id: "tg:1:0"}
+
+    assert {:error, :no_delivery_adapter} =
+             DefaultRuntime.deliver_to_session(session, "hello", %{})
+
+    assert {:error, :no_binding_adapter} =
+             DefaultRuntime.bind_session(session, "tg:1:0", [:telegram_sender], %{})
+
+    assert :ok = DefaultRuntime.bind_session(session, "tg:1:0", [], %{})
   end
 
   defp logged_arg_after(args, marker) do
