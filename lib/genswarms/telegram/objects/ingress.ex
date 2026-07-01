@@ -39,7 +39,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       sender: Map.get(config, :sender, :telegram_sender),
       binding_authority: Map.get(config, :binding_authority, :telegram_ingress),
       binding_sinks: Map.get(config, :binding_sinks, [:telegram_sender]),
-      memory_policy: Map.get(config, :memory_policy, :dm_only),
+      memory_policy: Map.get(config, :memory_policy, :none),
       poll_enabled: Map.get(config, :poll_enabled, false),
       poll_interval_ms: Map.get(config, :poll_interval_ms, 1_500),
       poll_timeout_s: Map.get(config, :poll_timeout_s, 25),
@@ -283,15 +283,31 @@ defmodule Genswarms.Telegram.Objects.Ingress do
 
     case result do
       {:reply, text} ->
+        state = maybe_after_routed(state, event, %{kind: kind, conversation_id: event.conversation_id})
         send_command_reply(event, text, state)
 
       {:send, to, payload} ->
+        state =
+          maybe_after_routed(state, event, %{
+            kind: kind,
+            target: to,
+            conversation_id: event.conversation_id
+          })
+
         {:send, to, encode_payload(payload), state}
 
       {:send_many, messages} ->
+        state =
+          maybe_after_routed(state, event, %{
+            kind: kind,
+            targets: Enum.map(messages, fn {to, _payload} -> to end),
+            conversation_id: event.conversation_id
+          })
+
         {:send_many, encode_messages(messages), state}
 
       :ok ->
+        state = maybe_after_routed(state, event, %{kind: kind, conversation_id: event.conversation_id})
         {:ok, %{ok: true, command: true, conversation_id: event.conversation_id}, state}
 
       {:error, reason} ->

@@ -115,6 +115,54 @@ defmodule Genswarms.Telegram.ObjectsTest do
     assert plain_retry.payload.text == "hi"
   end
 
+  test "sender keeps reply threading on photo replies", %{fake: fake} do
+    {:ok, state} =
+      Sender.init(%{
+        bot_token: "token",
+        client: Fake,
+        client_opts: [fake: fake],
+        slot_prefix: "telegram_agent"
+      })
+
+    {:noreply, state} =
+      Sender.handle_message(
+        :telegram_ingress,
+        %{
+          "action" => "bind_session",
+          "slot" => "telegram_agent_0",
+          "conversation_id" => "tg:1:0"
+        },
+        state
+      )
+
+    {:noreply, state} =
+      Sender.handle_message(
+        :telegram_ingress,
+        %{"action" => "typing", "conversation_id" => "tg:1:0", "message_id" => 55},
+        state
+      )
+
+    {:noreply, _state} =
+      Sender.handle_message(
+        :telegram_agent_0,
+        %{
+          "action" => "reply",
+          "text" => "look",
+          "photo" => "https://example.com/a.png",
+          "reply_to_message_id" => "55"
+        },
+        state
+      )
+
+    [_typing, photo_send] = Fake.calls(fake)
+
+    assert photo_send.method == :send_photo
+    assert photo_send.payload.reply_parameters == %{
+             message_id: 55,
+             allow_sending_without_reply: true
+           }
+  end
+
   test "sender posts progress once then edits the progress message", %{fake: fake} do
     Fake.push_response(fake, {:ok, %{"message_id" => 77}})
     Fake.push_response(fake, {:ok, %{"message_id" => 77}})
@@ -463,6 +511,12 @@ defmodule Genswarms.Telegram.ObjectsTest do
     assert photo.chat_id == "5"
     assert photo.photo == "https://example.com/a.png"
     refute Map.has_key?(photo, :message_thread_id)
+
+    threaded_photo =
+      Sender.build_photo_body("tg:-100123:9", "https://example.com/a.png", "look", "HTML", nil, 42)
+
+    assert threaded_photo.message_thread_id == 9
+    assert threaded_photo.reply_parameters == %{message_id: 42, allow_sending_without_reply: true}
 
     assert Sender.use_photo?("https://example.com/a.png", "short")
     refute Sender.use_photo?("https://example.com/a.png", String.duplicate("a", 1_025))
@@ -874,6 +928,60 @@ defmodule Genswarms.Telegram.ObjectsTest do
     assert_receive {:after_routed, %{conversation_id: "tg:123:0"}, %{kind: :session}}
   end
 
+  test "ingress calls routed effects for command router sends", %{fake: fake} do
+    parent = self()
+
+    defmodule SendCommandRouterForIngressTest do
+      @behaviour Genswarms.Telegram.CommandRouter
+
+      @impl true
+      def handle_command(event, _state, opts \\ %{}) do
+        send(opts.parent, {:command_seen, event.conversation_id})
+        {:send, :commands, %{action: "command", conversation_id: event.conversation_id}}
+      end
+
+      @impl true
+      def handle_callback(_event, _state, _opts \\ %{}), do: :ok
+    end
+
+    defmodule RoutedEffectsForCommandTest do
+      @behaviour Genswarms.Telegram.InboundEffects
+
+      @impl true
+      def init(opts), do: {:ok, %{parent: opts.parent}}
+
+      @impl true
+      def after_routed(event, route, _meta, state) do
+        send(state.parent, {:command_after_routed, event, route})
+        {:ok, Map.put(state, :after_routed?, true)}
+      end
+    end
+
+    {:ok, state} =
+      Ingress.init(%{
+        bot_token: "token",
+        client: Fake,
+        client_opts: [fake: fake],
+        bot_username: "OurBot",
+        command_router: {SendCommandRouterForIngressTest, %{parent: parent}},
+        inbound_effects: {RoutedEffectsForCommandTest, %{parent: parent}},
+        poll_enabled: false
+      })
+
+    update = %{
+      "update_id" => 27,
+      "message" => %{"chat" => %{"id" => 123}, "text" => "/start"}
+    }
+
+    {:send, :commands, payload, state} =
+      Ingress.handle_message(:test, %{"action" => "inject_update", "update" => update}, state)
+
+    assert Jason.decode!(payload)["conversation_id"] == "tg:123:0"
+    assert state.inbound_effects_state.after_routed? == true
+    assert_receive {:command_seen, "tg:123:0"}
+    assert_receive {:command_after_routed, %{conversation_id: "tg:123:0"}, %{kind: :command}}
+  end
+
   test "ingress registers command menus through the command router", %{fake: fake} do
     {:ok, state} =
       Ingress.init(%{
@@ -947,7 +1055,7 @@ defmodule Genswarms.Telegram.ObjectsTest do
     refute Genswarms.Telegram.Store.File.update_seen?(state.bot_ref, 30)
   end
 
-  test "default memory policy does not persist group memories", %{fake: fake} do
+  test "default memory policy does not persist conversation memories", %{fake: fake} do
     parent = self()
 
     defmodule RuntimeForGroupMemoryPolicyTest do
@@ -970,19 +1078,52 @@ defmodule Genswarms.Telegram.ObjectsTest do
         poll_enabled: false
       })
 
-    update = %{
-      "update_id" => 40,
-      "message" => %{"chat" => %{"id" => -100}, "text" => "@OurBot hello"}
-    }
+    update = %{"update_id" => 40, "message" => %{"chat" => %{"id" => 100}, "text" => "hello"}}
 
     {:reply, body, state} =
       Ingress.handle_message(:test, %{"action" => "inject_update", "update" => update}, state)
 
     assert Jason.decode!(body)["routed"] == true
-    assert_receive {:group_delivered, %{conversation_id: "tg:-100:0"}, _text}
+    assert_receive {:group_delivered, %{conversation_id: "tg:100:0"}, _text}
 
     refute File.exists?(
-             Genswarms.Telegram.Context.MemoryMd.memory_path(state.bot_ref, "tg:-100:0")
+             Genswarms.Telegram.Context.MemoryMd.memory_path(state.bot_ref, "tg:100:0")
+           )
+  end
+
+  test "dm-only memory policy opts into durable private chat memory", %{fake: fake} do
+    parent = self()
+
+    defmodule RuntimeForDmMemoryPolicyTest do
+      def ensure_session(cid, _opts), do: {:ok, %{slot: :telegram_agent_0, conversation_id: cid}}
+
+      def deliver_to_session(session, text, opts) do
+        send(opts.parent, {:dm_delivered, session, text})
+        :ok
+      end
+    end
+
+    {:ok, state} =
+      Ingress.init(%{
+        bot_token: "token",
+        client: Fake,
+        client_opts: [fake: fake],
+        session_runtime: RuntimeForDmMemoryPolicyTest,
+        session_opts: %{parent: parent},
+        memory_policy: :dm_only,
+        poll_enabled: false
+      })
+
+    update = %{"update_id" => 41, "message" => %{"chat" => %{"id" => 101}, "text" => "hello"}}
+
+    {:reply, body, state} =
+      Ingress.handle_message(:test, %{"action" => "inject_update", "update" => update}, state)
+
+    assert Jason.decode!(body)["routed"] == true
+    assert_receive {:dm_delivered, %{conversation_id: "tg:101:0"}, _text}
+
+    assert File.exists?(
+             Genswarms.Telegram.Context.MemoryMd.memory_path(state.bot_ref, "tg:101:0")
            )
   end
 end

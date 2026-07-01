@@ -47,6 +47,26 @@ defmodule Genswarms.Telegram.ClientStoreMemoryTest do
     assert [%{method: :get_me, payload: %{}}] = Fake.calls(fake)
   end
 
+  test "client exposes webhook registration helpers through adapters" do
+    {:ok, fake} = Fake.start_link([{:ok, true}, {:ok, true}, {:ok, %{"url" => ""}}])
+
+    assert {:ok, true} =
+             Client.set_webhook(Fake, %{url: "https://example.com/telegram"}, fake: fake)
+
+    assert {:ok, true} = Client.delete_webhook(Fake, %{drop_pending_updates: true}, fake: fake)
+    assert {:ok, %{"url" => ""}} = Client.get_webhook_info(Fake, fake: fake)
+
+    assert [
+             %{method: :set_webhook, payload: %{url: "https://example.com/telegram"}},
+             %{method: :delete_webhook, payload: %{drop_pending_updates: true}},
+             %{method: :get_webhook_info, payload: %{}}
+           ] = Fake.calls(fake)
+
+    assert Client.method_name(:set_webhook) == "setWebhook"
+    assert Client.method_name(:delete_webhook) == "deleteWebhook"
+    assert Client.method_name(:get_webhook_info) == "getWebhookInfo"
+  end
+
   test "client response classification handles rate limits and dead chats" do
     assert {:ok, %{"message_id" => 1}} =
              Client.classify_response(200, ~s({"ok":true,"result":{"message_id":1}}))

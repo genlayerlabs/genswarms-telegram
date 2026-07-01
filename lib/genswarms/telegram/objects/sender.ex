@@ -801,11 +801,17 @@ defmodule Genswarms.Telegram.Objects.Sender do
     end
   end
 
-  def build_photo_body(cid, photo, caption, parse_mode, reply_markup \\ nil) do
+  def build_photo_body(cid, photo, caption, parse_mode, reply_markup \\ nil, reply_to \\ nil) do
     base = %{chat_id: ConversationId.chat_id(cid), photo: photo, caption: caption}
     base = maybe_thread(base, cid)
     base = if parse_mode, do: Map.put(base, :parse_mode, parse_mode), else: base
-    if reply_markup, do: Map.put(base, :reply_markup, reply_markup), else: base
+    base = if reply_markup, do: Map.put(base, :reply_markup, reply_markup), else: base
+
+    if is_integer(reply_to) do
+      Map.put(base, :reply_parameters, %{message_id: reply_to, allow_sending_without_reply: true})
+    else
+      base
+    end
   end
 
   def build_reply_markup(buttons), do: Buttons.reply_markup(buttons)

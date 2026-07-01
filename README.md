@@ -10,7 +10,7 @@ persona, private policy, quota logic, or domain commands.
 ```elixir
 def deps do
   [
-    {:genswarms_telegram, github: "genlayerlabs/genswarms-telegram", tag: "v0.1.6"}
+    {:genswarms_telegram, github: "genlayerlabs/genswarms-telegram", tag: "v0.1.7"}
   ]
 end
 ```
@@ -45,9 +45,11 @@ used. Consumers that do not want dynamic GenSwarms spawning can inject their own
   helpers, including a single-file offset adapter for hosts with existing state.
 - `Genswarms.Telegram.Parser`, `Delivery`, `Buttons`, `Addressing`, `SpamGuard`,
   `Format`, `ConversationId`, `Webhook` — pure Telegram update, payload, button,
-  addressing, spam-guard, formatting, id, and webhook helpers.
-- `Genswarms.Telegram.Store.File` and `Context.MemoryMd` — minimal local defaults
-  for bot transport state and durable per-conversation `MEMORY.md`.
+  addressing, spam-guard, formatting, id, webhook decode, and webhook
+  registration helpers.
+- `Genswarms.Telegram.Store.File` and `Context.MemoryMd` — minimal local
+  adapters for bot transport state and optional durable per-conversation
+  `MEMORY.md`.
 - `priv/reply.sh` — agent reply helper using `GENSWARMS_TELEGRAM_CONVERSATION_ID`
   and `GENSWARMS_TELEGRAM_SENDER_OBJECT`. The helper does not include a Telegram
   target in the payload; the sender must resolve the target from the caller's bound
@@ -73,16 +75,16 @@ eviction policy.
 
 - App: `:genswarms_telegram`
 - Modules: `Genswarms.Telegram.*`
-- Swarmidx ref: `swarmidx:acastellana/genswarms-telegram@0.1.6` is published;
-  `v0.1.6` is the current package Git tag.
+- Swarmidx ref: `swarmidx:acastellana/genswarms-telegram@0.1.7` is published;
+  `v0.1.7` is the current package Git tag.
 - Sender object: `:telegram_sender`
 - Ingress object: `:telegram_ingress`
 - Agent conversation env: `GENSWARMS_TELEGRAM_CONVERSATION_ID`
 - Reply helper sender env: `GENSWARMS_TELEGRAM_SENDER_OBJECT`
 - Linux state dir: `${XDG_STATE_HOME:-$HOME/.local/state}/genswarms/telegram`
 - Workspace root: `${TMPDIR:-/tmp}/genswarms-telegram`
-- Memory policy: DMs only by default; use `memory_policy: :all` to persist group
-  or topic memory.
+- Memory policy: `:none` by default; use `memory_policy: :dm_only` or
+  `memory_policy: :all` with `Context.MemoryMd` to persist conversation context.
 
 ## Client Adapters
 
@@ -116,8 +118,9 @@ Durable `MEMORY.md` files live outside reusable slot workspaces:
 The agent can see a copy at `<workspace>/MEMORY.md`, but slot workspaces are
 temporary and can be wiped safely.
 
-By default, `Ingress` uses `memory_policy: :dm_only`, so group and topic messages
-do not create durable `MEMORY.md` files unless the host opts in.
+By default, `Ingress` uses `memory_policy: :none`, so no durable `MEMORY.md`
+files are created unless the host opts in. `memory_policy: :dm_only` persists
+only private chats; `memory_policy: :all` also persists group and topic context.
 
 ## Object Protocol
 

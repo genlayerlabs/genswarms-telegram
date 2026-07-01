@@ -42,6 +42,7 @@ defmodule Genswarms.Telegram.Delivery do
       parse_mode: "HTML"
     }
     |> maybe_put_thread(cid)
+    |> maybe_put(:reply_parameters, reply_parameters(attrs))
     |> maybe_put(:reply_markup, reply_markup(Map.get(attrs, :buttons)))
   end
 

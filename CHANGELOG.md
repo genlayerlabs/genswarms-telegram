@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.7 - 2026-07-01
+
+- Declared `:crypto` as an OTP application because bot fingerprints, offset
+  paths, and curl temp names use crypto helpers at runtime.
+- Preserved reply threading on photo sends and photo fallback paths.
+- Added generic webhook registration client helpers for `setWebhook`,
+  `deleteWebhook`, and `getWebhookInfo`.
+- Made durable `MEMORY.md` context opt-in by defaulting ingress
+  `memory_policy` to `:none`.
+- Documented tuple adapter callback arities for host adapters configured as
+  `{Module, opts}`.
+
 ## 0.1.6 - 2026-07-01
 
 - Corrected the published README release metadata so the package artifact points

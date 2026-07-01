@@ -4,7 +4,7 @@ defmodule GenswarmsTelegram.MixProject do
   def project do
     [
       app: :genswarms_telegram,
-      version: "0.1.6",
+      version: "0.1.7",
       elixir: "~> 1.14",
       description: "Reusable Telegram transport and GenSwarms object handlers",
       package: package(),
@@ -18,7 +18,7 @@ defmodule GenswarmsTelegram.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger, :crypto]
     ]
   end
 

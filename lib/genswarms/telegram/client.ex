@@ -8,6 +8,9 @@ defmodule Genswarms.Telegram.Client do
           | :get_updates
           | :answer_callback_query
           | :set_my_commands
+          | :set_webhook
+          | :delete_webhook
+          | :get_webhook_info
           | :send_message
           | :send_photo
           | :send_chat_action
@@ -22,6 +25,9 @@ defmodule Genswarms.Telegram.Client do
     get_updates: "getUpdates",
     answer_callback_query: "answerCallbackQuery",
     set_my_commands: "setMyCommands",
+    set_webhook: "setWebhook",
+    delete_webhook: "deleteWebhook",
+    get_webhook_info: "getWebhookInfo",
     send_message: "sendMessage",
     send_photo: "sendPhoto",
     send_chat_action: "sendChatAction",
@@ -40,6 +46,14 @@ defmodule Genswarms.Telegram.Client do
 
   def set_my_commands(adapter, payload, opts \\ []),
     do: request(adapter, :set_my_commands, payload, opts)
+
+  def set_webhook(adapter, payload, opts \\ []),
+    do: request(adapter, :set_webhook, payload, opts)
+
+  def delete_webhook(adapter, payload \\ %{}, opts \\ []),
+    do: request(adapter, :delete_webhook, payload, opts)
+
+  def get_webhook_info(adapter, opts \\ []), do: request(adapter, :get_webhook_info, %{}, opts)
 
   def send_message(adapter, payload, opts \\ []),
     do: request(adapter, :send_message, payload, opts)
