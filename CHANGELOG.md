@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3 - 2026-07-01
+
+- Corrected the public swarmidx scope to the token-backed registry scope.
+- Documented the published package as `swarmidx:acastellana/genswarms-telegram@0.1.3`.
+
 ## 0.1.2 - 2026-07-01
 
 - Added tuple adapter support for host-specific stores, identity sinks, command routers, inbound effects, session runtimes, and delivery effects.
