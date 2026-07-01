@@ -11,7 +11,7 @@ defmodule Genswarms.Telegram.ConversationIdFormatTest do
   }
 
   test "package exposes a stable semantic version" do
-    assert Genswarms.Telegram.version() == "0.1.7"
+    assert Genswarms.Telegram.version() == "0.2.0"
   end
 
   test "conversation ids parse and classify DMs fail-closed" do

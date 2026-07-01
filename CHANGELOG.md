@@ -1,6 +1,55 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-07-02
+
+### Security
+
+- Added a default-deny scoped action gate for every sender action. Agent actions
+  are conversation-scoped to the caller's bound slot, while operator groups are
+  denied unless the host explicitly grants each group through `action_grants`.
+- Classified operator groups for chat administration, business, payments, gifts,
+  stories, sticker management, bot profile, managed bots, inline operations,
+  verification, passport, games, utility, message operations, and infrastructure.
+- Added `agent_surface`, `action_grants`, `audit_sources`,
+  `own_message_window`, and related gate metadata so hosts can expose only the
+  surfaces they intend.
+- Made `audit` require configured `audit_sources` instead of being
+  unauthenticated.
+- Scoped own-message edit and delete actions to messages sent by the same
+  calling slot and within the configured own-message window.
+- Routed ingress command replies through the sender so rate limiting,
+  redaction, delivery audit, and target authorization are applied consistently.
+
+### Agent surface & discovery
+
+- Derived `capabilities` from the action table and made it caller-specific so it
+  advertises only actions the caller may actually use, including card schema
+  details and Telegram Bot API 10.1 targeting.
+- Added teaching `validate_card` errors with paths and hints for agent
+  authoring.
+- Added curated, round-trip-verified `examples` for card and rich message
+  authoring.
+- Shipped a flat `priv/agent-guide/` for consumers that need file-based agent
+  guidance.
+- Added inbound `replied_to` and quote parsing plus outbound
+  `ReplyParameters` quote fields; quote fields are accepted only with a
+  `reply_to_message_id`.
+- Reclassified one-shot `send_chat_action` and `send_rich_raw` as restricted
+  operator/infrastructure actions while keeping system-managed typing unchanged.
+
+### Structure
+
+- Split `Genswarms.Telegram.Delivery` internals into per-group submodules under
+  `lib/genswarms/telegram/delivery/` while preserving the public delivery API.
+
+### Neutrality
+
+- Scrubbed shipped fixtures and documentation for product-neutral package
+  language.
+- Added a static neutrality test to keep product-specific terms out of shipped
+  files.
+
+### Added
 
 - Added a structured Telegram card/rich-message layer with safe rendering for
   headings, paragraphs, lists, checklists, tables, details, quotes, code,
