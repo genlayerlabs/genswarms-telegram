@@ -36,6 +36,7 @@ defmodule GenswarmsTelegram.MixProject do
       files: [
         "lib",
         "priv",
+        "docs",
         "examples",
         "mix.exs",
         "README.md",
