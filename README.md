@@ -10,7 +10,7 @@ persona, private policy, quota logic, or domain commands.
 ```elixir
 def deps do
   [
-    {:genswarms_telegram, github: "genlayerlabs/genswarms-telegram", tag: "v0.1.4"}
+    {:genswarms_telegram, github: "genlayerlabs/genswarms-telegram", tag: "v0.1.5"}
   ]
 end
 ```
@@ -20,6 +20,12 @@ Runtime tools used by defaults:
 - `curl` for `Genswarms.Telegram.Client.Curl`;
 - `jq` and `swarm-msg` for `priv/reply.sh`.
 
+This is a GenSwarms handler package. `genswarms` is a peer/runtime dependency
+provided by the host app; the default session runtime calls GenSwarms modules
+dynamically when `session_opts.swarm_name` and `session_opts.agent_template` are
+used. Consumers that do not want dynamic GenSwarms spawning can inject their own
+`deliver` function or replace the session runtime.
+
 ## What Importers Get
 
 - `Genswarms.Telegram.Objects.Ingress` — GenSwarms-native Telegram ingress handler
@@ -28,8 +34,9 @@ Runtime tools used by defaults:
   per-conversation session delivery through an injected runtime. Command-router
   replies are sent through Telegram before the update is marked processed.
 - `Genswarms.Telegram.Objects.Sender` — outbound Telegram handler with slot-to-chat
-  binding, fail-closed agent replies, send/reply/send_batch, typing, progress edits,
-  inline keyboards, photo fallback, chunking, parse-error plain-text retry, recent
+  binding, fail-closed agent replies, async bounded `send_batch`, typing keepalive,
+  owed-turn duplicate reply suppression, progress edit coalescing, inline keyboards,
+  photo fallback, rate-limited chunking, parse-error plain-text retry, recent
   reply-tag validation, and a bounded audit trail.
 - `Genswarms.Telegram.Client.Curl` — default shell-native Bot API adapter. It keeps
   bot tokens out of argv by using short-lived curl config/body files.
@@ -67,7 +74,7 @@ eviction policy.
 - App: `:genswarms_telegram`
 - Modules: `Genswarms.Telegram.*`
 - Swarmidx ref: `swarmidx:acastellana/genswarms-telegram@0.1.3` is published;
-  `v0.1.4` is currently available as a Git tag.
+  `v0.1.5` is the current package version.
 - Sender object: `:telegram_sender`
 - Ingress object: `:telegram_ingress`
 - Agent conversation env: `GENSWARMS_TELEGRAM_CONVERSATION_ID`

@@ -11,4 +11,6 @@ defmodule Genswarms.Telegram.CommandRouter do
   @callback handle_command(map(), map()) :: route_result()
   @callback handle_callback(map(), map()) :: route_result()
   @callback command_menu(:dm | :group, map()) :: [map()]
+
+  @optional_callbacks command_menu: 2
 end

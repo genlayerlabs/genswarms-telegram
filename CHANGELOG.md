@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.5 - 2026-07-01
+
+- Moved robust generic sender mechanics into the reusable package: bounded async
+  batch draining, rate limiting, typing keepalive, owed-turn duplicate reply
+  suppression, progress edit coalescing/expiry, public delivery helper wrappers,
+  and response classification helpers.
+- Kept host-specific delivery side effects behind the delivery effects adapter.
+- Aligned the session runtime behaviour with the modern ingress contract, wired
+  routed-update effects, and exposed a generic command-menu registration action.
+- Hardened command detection for leading-whitespace slash commands and preserved
+  Telegram `chat.type` in parsed events so hosts can scope member events safely.
+
 ## 0.1.4 - 2026-07-01
 
 - Added public generic Telegram addressing helpers.
@@ -28,7 +40,7 @@
 - Made outbound chunking preserve newline content exactly while still preferring
   newline boundaries and UTF-16-safe hard splits.
 - Added sender-compatible `disable_web_page_preview` in sendMessage payloads.
-- Added Wingston-compatible identity aliases in parsed events.
+- Added host-compatible identity aliases in parsed events.
 - Skipped dedupe writes for malformed non-integer update ids.
 
 ## 0.1.0 - 2026-07-01

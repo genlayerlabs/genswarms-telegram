@@ -8,7 +8,7 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
       "update_id" => 1,
       "message" => %{
         "message_id" => 10,
-        "chat" => %{"id" => 123},
+        "chat" => %{"id" => 123, "type" => "private"},
         "from" => %{"id" => 5, "username" => "alice"},
         "text" => "hello"
       }
@@ -17,6 +17,7 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
     assert {:ok, event} = Parser.parse_update(update)
     assert event.type == :text
     assert event.conversation_id == "tg:123:0"
+    assert event.chat_type == "private"
     assert event.identity.username == "alice"
 
     callback = %{
@@ -24,32 +25,40 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
         "id" => "cb1",
         "from" => %{"id" => 5},
         "data" => "x",
-        "message" => %{"message_id" => 10, "chat" => %{"id" => 123}}
+        "message" => %{"message_id" => 10, "chat" => %{"id" => 123, "type" => "private"}}
       }
     }
 
-    assert {:ok, %{type: :callback, callback_query_id: "cb1"}} = Parser.parse_update(callback)
+    assert {:ok, %{type: :callback, callback_query_id: "cb1", chat_type: "private"}} =
+             Parser.parse_update(callback)
     assert :ignore = Parser.parse_update(%{"edited_message" => update["message"]})
 
     channel_post = %{
       "channel_post" => %{
-        "chat" => %{"id" => -100},
+        "chat" => %{"id" => -100, "type" => "supergroup"},
         "message_thread_id" => 4,
         "caption" => "captioned"
       }
     }
 
-    assert {:ok, %{source: :channel_post, conversation_id: "tg:-100:4", text: "captioned"}} =
+    assert {:ok,
+            %{
+              source: :channel_post,
+              conversation_id: "tg:-100:4",
+              text: "captioned",
+              chat_type: "supergroup"
+            }} =
              Parser.parse_update(channel_post)
 
     member = %{
       "my_chat_member" => %{
-        "chat" => %{"id" => 123},
+        "chat" => %{"id" => 123, "type" => "private"},
         "new_chat_member" => %{"status" => "kicked"}
       }
     }
 
-    assert {:ok, %{type: :member, reachable?: false, conversation_id: "tg:123:0"}} =
+    assert {:ok,
+            %{type: :member, reachable?: false, conversation_id: "tg:123:0", chat_type: "private"}} =
              Parser.parse_update(member)
   end
 

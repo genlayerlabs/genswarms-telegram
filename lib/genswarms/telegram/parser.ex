@@ -13,6 +13,7 @@ defmodule Genswarms.Telegram.Parser do
 
   def parse_update(%{"callback_query" => cb} = update) when is_map(cb) do
     with %{"id" => callback_id, "message" => %{"chat" => %{"id" => chat_id}} = message} <- cb do
+      chat = Map.get(message, "chat", %{})
       thread_id = Map.get(message, "message_thread_id", "0")
 
       {:ok,
@@ -23,6 +24,7 @@ defmodule Genswarms.Telegram.Parser do
          data: Map.get(cb, "data", ""),
          conversation_id: ConversationId.build(chat_id, thread_id),
          chat_id: chat_id,
+         chat_type: Map.get(chat, "type"),
          thread_id: thread_id,
          message_id: Map.get(message, "message_id"),
          identity: identity(Map.get(cb, "from", %{}))
@@ -33,7 +35,7 @@ defmodule Genswarms.Telegram.Parser do
   end
 
   def parse_update(%{"my_chat_member" => member} = update) when is_map(member) do
-    with %{"chat" => %{"id" => chat_id}} <- member do
+    with %{"chat" => %{"id" => chat_id} = chat} <- member do
       status = get_in(member, ["new_chat_member", "status"])
 
       {:ok,
@@ -44,6 +46,7 @@ defmodule Genswarms.Telegram.Parser do
          reachable?: status not in ["kicked", "left"],
          conversation_id: ConversationId.build(chat_id, "0"),
          chat_id: chat_id,
+         chat_type: Map.get(chat, "type"),
          thread_id: "0",
          identity: identity(Map.get(member, "from", %{}))
        }}
@@ -59,7 +62,7 @@ defmodule Genswarms.Telegram.Parser do
 
   def parse_update(_), do: :ignore
 
-  defp parse_message(update, %{"chat" => %{"id" => chat_id}} = message, source) do
+  defp parse_message(update, %{"chat" => %{"id" => chat_id} = chat} = message, source) do
     thread_id = Map.get(message, "message_thread_id", "0")
     {kind, text} = text_from_message(message)
 
@@ -70,6 +73,7 @@ defmodule Genswarms.Telegram.Parser do
        update_id: Map.get(update, "update_id"),
        conversation_id: ConversationId.build(chat_id, thread_id),
        chat_id: chat_id,
+       chat_type: Map.get(chat, "type"),
        thread_id: thread_id,
        message_id: Map.get(message, "message_id"),
        date: Map.get(message, "date"),

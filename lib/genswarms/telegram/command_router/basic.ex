@@ -33,5 +33,10 @@ defmodule Genswarms.Telegram.CommandRouter.Basic do
     |> hd()
   end
 
+  defp command_name(text) when is_binary(text) do
+    trimmed = String.trim_leading(text)
+    if trimmed == text, do: "", else: command_name(trimmed)
+  end
+
   defp command_name(_), do: ""
 end

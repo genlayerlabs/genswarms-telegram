@@ -5,8 +5,10 @@ defmodule Genswarms.Telegram.AddressingSpamButtonsTest do
 
   test "addressing handles slash command targets and group mentions" do
     assert Addressing.command_addressed?("/mode quiet", "ExampleBot")
+    assert Addressing.command_addressed?("  /mode quiet", "ExampleBot")
     assert Addressing.command_addressed?("/mode@examplebot quiet", "ExampleBot")
     refute Addressing.command_addressed?("/mode@OtherBot quiet", "ExampleBot")
+    refute Addressing.command_addressed?("  /mode@OtherBot quiet", "ExampleBot")
     refute Addressing.command_addressed?("hello /mode", "ExampleBot")
 
     event = %{
