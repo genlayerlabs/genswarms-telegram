@@ -10,7 +10,7 @@ persona, private policy, quota logic, or domain commands.
 ```elixir
 def deps do
   [
-    {:genswarms_telegram, github: "genlayerlabs/genswarms-telegram", tag: "v0.1.5"}
+    {:genswarms_telegram, github: "genlayerlabs/genswarms-telegram", tag: "v0.1.6"}
   ]
 end
 ```
@@ -73,8 +73,8 @@ eviction policy.
 
 - App: `:genswarms_telegram`
 - Modules: `Genswarms.Telegram.*`
-- Swarmidx ref: `swarmidx:acastellana/genswarms-telegram@0.1.5` is published;
-  `v0.1.5` is the current package Git tag.
+- Swarmidx ref: `swarmidx:acastellana/genswarms-telegram@0.1.6` is published;
+  `v0.1.6` is the current package Git tag.
 - Sender object: `:telegram_sender`
 - Ingress object: `:telegram_ingress`
 - Agent conversation env: `GENSWARMS_TELEGRAM_CONVERSATION_ID`
