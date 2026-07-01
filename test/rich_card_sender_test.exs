@@ -3,7 +3,7 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
 
   alias Genswarms.Telegram.Client
   alias Genswarms.Telegram.Client.Fake
-  alias Genswarms.Telegram.{Capabilities, Card, Delivery, RichMessage}
+  alias Genswarms.Telegram.{Actions, Capabilities, Card, Delivery, RichMessage}
   alias Genswarms.Telegram.Objects.Sender
 
   test "client exposes rich/media/poll method names" do
@@ -183,17 +183,17 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     assert "send_card" in sender.actions
     assert "send_contact" in sender.actions
     assert "send_media_group" in sender.actions
-    assert "send_gift" in sender.actions
-    assert "get_my_star_balance" in sender.actions
-    assert "verify_user" in sender.actions
-    assert "set_business_account_name" in sender.actions
-    assert "answer_guest_query" in sender.actions
-    assert "get_managed_bot_token" in sender.actions
-    assert "set_passport_data_errors" in sender.actions
-    assert "set_game_score" in sender.actions
-    assert "set_my_commands" in sender.actions
-    assert "set_chat_menu_button" in sender.actions
-    assert "post_story" in sender.actions
+    assert Actions.classify("send_gift") == {:operator, :gifts}
+    assert Actions.classify("get_my_star_balance") == {:operator, :payments}
+    assert Actions.classify("verify_user") == {:operator, :verification}
+    assert Actions.classify("set_business_account_name") == {:operator, :business}
+    assert Actions.classify("answer_guest_query") == {:operator, :inline}
+    assert Actions.classify("get_managed_bot_token") == {:operator, :managed_bots}
+    assert Actions.classify("set_passport_data_errors") == {:operator, :passport}
+    assert Actions.classify("set_game_score") == {:operator, :games}
+    assert Actions.classify("set_my_commands") == {:operator, :bot_profile}
+    assert Actions.classify("set_chat_menu_button") == {:operator, :bot_profile}
+    assert Actions.classify("post_story") == {:operator, :stories}
     assert "business_profile" in sender.business_scoped
     assert "user_verification" in sender.organization_scoped
     assert "token_replace" in sender.managed_bot_scoped
@@ -206,7 +206,8 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     assert "sticker_sets" in sender.sticker_scoped
     assert "gift_transfer" in sender.business_scoped
     assert "story" in sender.business_scoped
-    assert catalog.implemented_agent_safe == sender.actions
+    assert Enum.all?(Actions.actions_in(:core), &(&1 in interface.actions))
+    assert Enum.all?(Actions.actions_in(:media), &(&1 in interface.actions))
     assert Enum.all?(sender.actions, &(&1 in interface.actions))
     assert "sendGift" in catalog.implemented_client_methods
     assert "verifyUser" in catalog.implemented_client_methods
@@ -226,12 +227,12 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
     assert "create_forum_topic" in interface.actions
     assert "get_file" in interface.actions
     assert "create_new_sticker_set" in interface.actions
-    assert catalog.prepared_restricted.business == []
-    assert catalog.prepared_restricted.managed_bots == []
-    assert catalog.prepared_restricted.passport == []
-    assert catalog.prepared_restricted.stories == []
-    assert catalog.prepared_restricted.chat_admin == []
-    assert catalog.prepared_restricted.stickers == []
+    assert Actions.actions_in(:business) != []
+    assert Actions.actions_in(:managed_bots) != []
+    assert Actions.actions_in(:passport) != []
+    assert Actions.actions_in(:stories) != []
+    assert Actions.actions_in(:chat_admin) != []
+    assert Actions.actions_in(:stickers_mgmt) != []
   end
 
   test "delivery builds rich, draft, edit, media, and poll payloads" do
@@ -2134,7 +2135,9 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
 
   test "sender dispatches chat admin and forum actions through the client" do
     {:ok, fake} = Fake.start_link()
-    state = Sender.new(%{client: Fake, client_opts: [fake: fake]})
+
+    state =
+      Sender.new(%{client: Fake, client_opts: [fake: fake], action_grants: operator_grants()})
 
     {:noreply, state} =
       Sender.handle_message(
@@ -2196,7 +2199,9 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
 
   test "sender dispatches utility and sticker actions through the client" do
     {:ok, fake} = Fake.start_link()
-    state = Sender.new(%{client: Fake, client_opts: [fake: fake]})
+
+    state =
+      Sender.new(%{client: Fake, client_opts: [fake: fake], action_grants: operator_grants()})
 
     {:noreply, state} =
       Sender.handle_message(
@@ -3422,7 +3427,28 @@ defmodule Genswarms.Telegram.RichCardSenderTest do
       binding_authority: :telegram_ingress,
       send_sources: [:telegram_ingress],
       progress_sources: [:telegram_ingress],
+      action_grants: operator_grants(),
       rate_per_sec: 1_000
     })
+  end
+
+  defp operator_grants(source \\ :telegram_ingress) do
+    %{
+      chat_admin: [source],
+      message_ops: [source],
+      payments: [source],
+      gifts: [source],
+      business: [source],
+      stories: [source],
+      stickers_mgmt: [source],
+      bot_profile: [source],
+      managed_bots: [source],
+      inline: [source],
+      verification: [source],
+      passport: [source],
+      games: [source],
+      utility: [source],
+      infra: [source]
+    }
   end
 end

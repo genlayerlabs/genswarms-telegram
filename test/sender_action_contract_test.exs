@@ -82,7 +82,19 @@ defmodule Genswarms.Telegram.SenderActionContractTest do
 
   setup do
     {:ok, fake} = Fake.start_link()
-    state = Sender.new(%{client: Fake, client_opts: [fake: fake], rate_per_sec: 1_000})
+
+    state =
+      Sender.new(%{
+        client: Fake,
+        client_opts: [fake: fake],
+        rate_per_sec: 1_000,
+        action_grants: %{
+          utility: [:telegram_ingress],
+          chat_admin: [:telegram_ingress],
+          stickers_mgmt: [:telegram_ingress]
+        }
+      })
+
     {:ok, fake: fake, state: state}
   end
 

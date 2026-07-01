@@ -9,7 +9,16 @@ defmodule Genswarms.Telegram.Objects.Sender do
   configured `Genswarms.Telegram.DeliveryEffects` adapter.
   """
 
-  alias Genswarms.Telegram.{Adapter, Buttons, Card, Client, ConversationId, Delivery, RichMessage}
+  alias Genswarms.Telegram.{
+    Actions,
+    Adapter,
+    Buttons,
+    Card,
+    Client,
+    ConversationId,
+    Delivery,
+    RichMessage
+  }
 
   require Logger
 
@@ -20,6 +29,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
   @max_typing_ticks 15
   @progress_text_max 200
   @spam_window_ms 30_000
+  @gate_key "__telegram_gate__"
   @utility_actions ~w(
     get_user_profile_photos
     get_user_profile_audios
@@ -102,7 +112,10 @@ defmodule Genswarms.Telegram.Objects.Sender do
   end
 
   def new(config \\ %{}) do
+    validate_action_table!()
+
     token = Map.get(config, :bot_token) || System.get_env("GENSWARMS_TELEGRAM_BOT_TOKEN")
+    binding_authority = Map.get(config, :binding_authority, :telegram_ingress)
 
     %{
       bot_ref: Map.get(config, :bot_ref) || Genswarms.Telegram.BotRef.from_token(token),
@@ -112,19 +125,19 @@ defmodule Genswarms.Telegram.Objects.Sender do
       dry_run: Map.get(config, :dry_run, false),
       rate_per_sec: Map.get(config, :rate_per_sec, 25),
       window: [],
-      binding_authority: Map.get(config, :binding_authority, :telegram_ingress),
+      binding_authority: binding_authority,
       slot_prefix: Map.get(config, :slot_prefix, "telegram_agent"),
       slots: %{},
-      send_sources:
-        Map.get(config, :send_sources, [Map.get(config, :binding_authority, :telegram_ingress)]),
-      progress_sources:
-        Map.get(config, :progress_sources, [
-          Map.get(config, :binding_authority, :telegram_ingress)
-        ]),
-      typing_sources:
-        Map.get(config, :typing_sources, [Map.get(config, :binding_authority, :telegram_ingress)]),
+      send_sources: Map.get(config, :send_sources, [binding_authority]),
+      progress_sources: Map.get(config, :progress_sources, [binding_authority]),
+      typing_sources: Map.get(config, :typing_sources, [binding_authority]),
       batch_sources: Map.get(config, :batch_sources, []),
       slot_reply_sources: Map.get(config, :slot_reply_sources, []),
+      agent_surface: normalize_agent_surface(Map.get(config, :agent_surface, :standard)),
+      action_grants: normalize_action_grants(Map.get(config, :action_grants, %{})),
+      audit_sources: Map.get(config, :audit_sources, [binding_authority]) || [binding_authority],
+      own_message_window: Map.get(config, :own_message_window, 200),
+      own_messages: %{},
       delivery_effects:
         Map.get(config, :delivery_effects, Genswarms.Telegram.DeliveryEffects.Noop),
       identity_sink: Map.get(config, :identity_sink, Genswarms.Telegram.IdentitySink.Noop),
@@ -277,7 +290,123 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  defp dispatch(
+  defp dispatch(from, %{"action" => action} = msg, state) do
+    case authorize_action(from, action, msg, state) do
+      {:ok, gate} -> dispatch_authorized(from, Map.put(msg, @gate_key, gate), state)
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp dispatch(_from, _msg, state), do: {:error, :unknown_action, state}
+
+  defp authorize_action(from, action, msg, state) do
+    caller = caller_scope(from, state)
+
+    case caller do
+      %{kind: :unbound_slot} ->
+        {:error, :unbound_slot}
+
+      _scope ->
+        case Actions.classify(action) do
+          :unknown -> {:error, :unknown_action}
+          {:agent, group} -> authorize_agent_action(from, action, group, msg, state, caller)
+          {:operator, group} -> authorize_operator_action(from, group, caller, state)
+          {:plumbing, plumbing} -> authorize_plumbing_action(from, plumbing, msg, state)
+        end
+    end
+  end
+
+  defp authorize_agent_action(from, action, group, msg, state, caller) do
+    cond do
+      not agent_group_enabled?(state.agent_surface, group) ->
+        {:error, :unauthorized_action}
+
+      delete_action?(action) and operator_granted?(from, :message_ops, state) ->
+        {:ok, %{class: :operator, group: :message_ops, caller: caller.kind}}
+
+      targetless_agent_action?(action, group) ->
+        {:ok, %{class: :agent, group: group, caller: caller.kind}}
+
+      caller.kind == :bound_slot ->
+        authorize_bound_agent_action(action, group, msg, state, caller)
+
+      delete_action?(action) ->
+        {:error, :unauthorized_action}
+
+      true ->
+        authorize_named_agent_action(from, action, group, msg, state, caller)
+    end
+  end
+
+  defp authorize_bound_agent_action(action, :own_messages = group, msg, state, caller) do
+    with :ok <- authorize_own_message(action, msg, state, caller) do
+      {:ok, %{class: :agent, group: group, caller: caller.kind, target: caller.cid}}
+    end
+  end
+
+  defp authorize_bound_agent_action(_action, group, _msg, _state, caller) do
+    {:ok, %{class: :agent, group: group, caller: caller.kind, target: caller.cid}}
+  end
+
+  defp authorize_named_agent_action(from, action, group, msg, state, caller) do
+    direct_sources =
+      case action do
+        "progress" -> state.progress_sources
+        _action -> state.send_sources
+      end
+
+    case direct_target(from, Map.get(msg, "conversation_id") || to_string(from), direct_sources) do
+      {:ok, cid} -> {:ok, %{class: :agent, group: group, caller: caller.kind, target: cid}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp authorize_operator_action(from, group, caller, state) do
+    if operator_granted?(from, group, state) do
+      {:ok, %{class: :operator, group: group, caller: caller.kind}}
+    else
+      {:error, :unauthorized_action}
+    end
+  end
+
+  defp authorize_plumbing_action(from, :bind_session, _msg, state) do
+    if from == state.binding_authority,
+      do: {:ok, %{class: :plumbing}},
+      else: {:error, :unauthorized_binding}
+  end
+
+  defp authorize_plumbing_action(from, :unbind_session, _msg, state) do
+    if from == state.binding_authority,
+      do: {:ok, %{class: :plumbing}},
+      else: {:error, :unauthorized_binding}
+  end
+
+  defp authorize_plumbing_action(from, :typing, msg, state) do
+    case direct_target(from, Map.get(msg, "conversation_id"), state.typing_sources) do
+      {:ok, cid} -> {:ok, %{class: :plumbing, target: cid}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp authorize_plumbing_action(from, :send_batch, _msg, state) do
+    if from in state.batch_sources,
+      do: {:ok, %{class: :plumbing}},
+      else: {:error, :unauthorized_batch}
+  end
+
+  defp authorize_plumbing_action(from, :slot_reply, _msg, state) do
+    if from in state.slot_reply_sources,
+      do: {:ok, %{class: :plumbing}},
+      else: {:error, :unauthorized_slot_reply}
+  end
+
+  defp authorize_plumbing_action(from, :audit, _msg, state) do
+    if from in state.audit_sources,
+      do: {:ok, %{class: :plumbing}},
+      else: {:error, :unauthorized_audit}
+  end
+
+  defp dispatch_authorized(
          from,
          %{"action" => "bind_session", "slot" => slot, "conversation_id" => cid},
          state
@@ -289,7 +418,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
     end
   end
 
-  defp dispatch(from, %{"action" => "unbind_session", "slot" => slot}, state) do
+  defp dispatch_authorized(from, %{"action" => "unbind_session", "slot" => slot}, state) do
     if from == state.binding_authority do
       {:ok, %{state | slots: Map.delete(state.slots, to_string(slot))}}
     else
@@ -297,7 +426,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
     end
   end
 
-  defp dispatch(from, %{"action" => "typing", "conversation_id" => cid} = msg, state) do
+  defp dispatch_authorized(from, %{"action" => "typing", "conversation_id" => cid} = msg, state) do
     with {:ok, cid} <- resolve_target(from, cid, state, state.typing_sources) do
       state =
         if from == state.binding_authority do
@@ -314,21 +443,22 @@ defmodule Genswarms.Telegram.Objects.Sender do
     end
   end
 
-  defp dispatch(from, %{"action" => "progress"} = msg, state), do: send_progress(from, msg, state)
+  defp dispatch_authorized(from, %{"action" => "progress"} = msg, state),
+    do: send_progress(from, msg, state)
 
-  defp dispatch(from, %{"action" => "reply"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "reply"} = msg, state),
     do: send_text(from, msg, state, :reply)
 
-  defp dispatch(from, %{"action" => "send"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send"} = msg, state),
     do: send_text(from, msg, state, :proactive)
 
-  defp dispatch(_from, %{"action" => "capabilities"}, state),
+  defp dispatch_authorized(_from, %{"action" => "capabilities"}, state),
     do: {:reply, %{ok: true, capabilities: Card.capabilities()}, state}
 
-  defp dispatch(_from, %{"action" => "examples"}, state),
+  defp dispatch_authorized(_from, %{"action" => "examples"}, state),
     do: {:reply, %{ok: true, examples: Card.examples()}, state}
 
-  defp dispatch(_from, %{"action" => "validate_card", "card" => card} = msg, state) do
+  defp dispatch_authorized(_from, %{"action" => "validate_card", "card" => card} = msg, state) do
     opts = if truthy?(Map.get(msg, "draft")), do: %{draft?: true}, else: %{}
 
     case Card.validate(card, opts) do
@@ -337,10 +467,10 @@ defmodule Genswarms.Telegram.Objects.Sender do
     end
   end
 
-  defp dispatch(from, %{"action" => "stream_text"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "stream_text"} = msg, state),
     do: stream_text(from, msg, state)
 
-  defp dispatch(from, %{"action" => "answer_callback"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "answer_callback"} = msg, state),
     do:
       send_query_payload(from, msg, state, :answer_callback, fn ->
         Delivery.build_answer_callback_query(%{
@@ -352,7 +482,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "answer_web_app"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "answer_web_app"} = msg, state),
     do:
       send_query_payload(from, msg, state, :answer_web_app, fn ->
         Delivery.build_answer_web_app_query(%{
@@ -361,7 +491,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "answer_inline_query"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "answer_inline_query"} = msg, state),
     do:
       send_query_payload(from, msg, state, :answer_inline_query, fn ->
         Delivery.build_answer_inline_query(%{
@@ -374,7 +504,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "answer_guest_query"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "answer_guest_query"} = msg, state),
     do:
       send_query_payload(from, msg, state, :answer_guest_query, fn ->
         Delivery.build_answer_guest_query(%{
@@ -383,7 +513,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "save_prepared_inline_message"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "save_prepared_inline_message"} = msg, state),
     do:
       send_query_payload(from, msg, state, :save_prepared_inline_message, fn ->
         Delivery.build_save_prepared_inline_message(%{
@@ -396,7 +526,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "save_prepared_keyboard_button"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "save_prepared_keyboard_button"} = msg, state),
     do:
       send_query_payload(from, msg, state, :save_prepared_keyboard_button, fn ->
         Delivery.build_save_prepared_keyboard_button(%{
@@ -405,7 +535,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "get_user_chat_boosts"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_user_chat_boosts"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_user_chat_boosts, fn ->
         Delivery.build_get_user_chat_boosts(%{
@@ -414,7 +544,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "get_business_connection"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_business_connection"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_business_connection, fn ->
         Delivery.build_get_business_connection(%{
@@ -422,25 +552,25 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "get_managed_bot_token"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_managed_bot_token"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_managed_bot_token, fn ->
         Delivery.build_get_managed_bot_token(%{user_id: Map.get(msg, "user_id")})
       end)
 
-  defp dispatch(from, %{"action" => "replace_managed_bot_token"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "replace_managed_bot_token"} = msg, state),
     do:
       send_query_payload(from, msg, state, :replace_managed_bot_token, fn ->
         Delivery.build_replace_managed_bot_token(%{user_id: Map.get(msg, "user_id")})
       end)
 
-  defp dispatch(from, %{"action" => "get_managed_bot_access_settings"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_managed_bot_access_settings"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_managed_bot_access_settings, fn ->
         Delivery.build_get_managed_bot_access_settings(%{user_id: Map.get(msg, "user_id")})
       end)
 
-  defp dispatch(from, %{"action" => "set_managed_bot_access_settings"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "set_managed_bot_access_settings"} = msg, state),
     do:
       send_query_payload(from, msg, state, :set_managed_bot_access_settings, fn ->
         Delivery.build_set_managed_bot_access_settings(%{
@@ -450,7 +580,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "get_user_personal_chat_messages"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_user_personal_chat_messages"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_user_personal_chat_messages, fn ->
         Delivery.build_get_user_personal_chat_messages(%{
@@ -459,97 +589,105 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "set_my_commands"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "set_my_commands"} = msg, state),
     do:
       send_query_payload(from, msg, state, :set_my_commands, fn ->
         Delivery.build_set_my_commands(bot_profile_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "delete_my_commands"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "delete_my_commands"} = msg, state),
     do:
       send_query_payload(from, msg, state, :delete_my_commands, fn ->
         Delivery.build_delete_my_commands(bot_profile_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "get_my_commands"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_my_commands"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_my_commands, fn ->
         Delivery.build_get_my_commands(bot_profile_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "set_my_name"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "set_my_name"} = msg, state),
     do:
       send_query_payload(from, msg, state, :set_my_name, fn ->
         Delivery.build_set_my_name(bot_profile_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "get_my_name"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_my_name"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_my_name, fn ->
         Delivery.build_get_my_name(bot_profile_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "set_my_description"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "set_my_description"} = msg, state),
     do:
       send_query_payload(from, msg, state, :set_my_description, fn ->
         Delivery.build_set_my_description(bot_profile_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "get_my_description"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_my_description"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_my_description, fn ->
         Delivery.build_get_my_description(bot_profile_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "set_my_short_description"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "set_my_short_description"} = msg, state),
     do:
       send_query_payload(from, msg, state, :set_my_short_description, fn ->
         Delivery.build_set_my_short_description(bot_profile_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "get_my_short_description"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_my_short_description"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_my_short_description, fn ->
         Delivery.build_get_my_short_description(bot_profile_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "set_my_profile_photo"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "set_my_profile_photo"} = msg, state),
     do:
       send_query_payload(from, msg, state, :set_my_profile_photo, fn ->
         Delivery.build_set_my_profile_photo(%{photo: Map.get(msg, "photo")})
       end)
 
-  defp dispatch(from, %{"action" => "remove_my_profile_photo"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "remove_my_profile_photo"} = msg, state),
     do:
       send_query_payload(from, msg, state, :remove_my_profile_photo, fn ->
         Delivery.build_remove_my_profile_photo()
       end)
 
-  defp dispatch(from, %{"action" => "set_chat_menu_button"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "set_chat_menu_button"} = msg, state),
     do:
       send_query_payload(from, msg, state, :set_chat_menu_button, fn ->
         Delivery.build_set_chat_menu_button(bot_profile_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "get_chat_menu_button"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_chat_menu_button"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_chat_menu_button, fn ->
         Delivery.build_get_chat_menu_button(bot_profile_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "set_my_default_administrator_rights"} = msg, state),
-    do:
-      send_query_payload(from, msg, state, :set_my_default_administrator_rights, fn ->
-        Delivery.build_set_my_default_administrator_rights(bot_profile_attrs(msg))
-      end)
+  defp dispatch_authorized(
+         from,
+         %{"action" => "set_my_default_administrator_rights"} = msg,
+         state
+       ),
+       do:
+         send_query_payload(from, msg, state, :set_my_default_administrator_rights, fn ->
+           Delivery.build_set_my_default_administrator_rights(bot_profile_attrs(msg))
+         end)
 
-  defp dispatch(from, %{"action" => "get_my_default_administrator_rights"} = msg, state),
-    do:
-      send_query_payload(from, msg, state, :get_my_default_administrator_rights, fn ->
-        Delivery.build_get_my_default_administrator_rights(bot_profile_attrs(msg))
-      end)
+  defp dispatch_authorized(
+         from,
+         %{"action" => "get_my_default_administrator_rights"} = msg,
+         state
+       ),
+       do:
+         send_query_payload(from, msg, state, :get_my_default_administrator_rights, fn ->
+           Delivery.build_get_my_default_administrator_rights(bot_profile_attrs(msg))
+         end)
 
-  defp dispatch(from, %{"action" => "create_invoice_link"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "create_invoice_link"} = msg, state),
     do:
       send_query_payload(from, msg, state, :create_invoice_link, fn ->
         Delivery.build_create_invoice_link(%{
@@ -578,7 +716,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "answer_shipping_query"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "answer_shipping_query"} = msg, state),
     do:
       send_query_payload(from, msg, state, :answer_shipping_query, fn ->
         Delivery.build_answer_shipping_query(%{
@@ -589,7 +727,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "answer_pre_checkout_query"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "answer_pre_checkout_query"} = msg, state),
     do:
       send_query_payload(from, msg, state, :answer_pre_checkout_query, fn ->
         Delivery.build_answer_pre_checkout_query(%{
@@ -599,13 +737,13 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "get_my_star_balance"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_my_star_balance"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_my_star_balance, fn ->
         Delivery.build_get_my_star_balance()
       end)
 
-  defp dispatch(from, %{"action" => "get_star_transactions"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_star_transactions"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_star_transactions, fn ->
         Delivery.build_get_star_transactions(%{
@@ -614,13 +752,13 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "get_available_gifts"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_available_gifts"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_available_gifts, fn ->
         Delivery.build_get_available_gifts()
       end)
 
-  defp dispatch(from, %{"action" => "send_gift"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_gift"} = msg, state),
     do:
       send_query_payload(from, msg, state, :send_gift, fn ->
         Delivery.build_send_gift(%{
@@ -634,7 +772,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "gift_premium_subscription"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "gift_premium_subscription"} = msg, state),
     do:
       send_query_payload(from, msg, state, :gift_premium_subscription, fn ->
         Delivery.build_gift_premium_subscription(%{
@@ -647,7 +785,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "get_business_account_star_balance"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_business_account_star_balance"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_business_account_star_balance, fn ->
         Delivery.build_get_business_account_star_balance(%{
@@ -655,7 +793,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "transfer_business_account_stars"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "transfer_business_account_stars"} = msg, state),
     do:
       send_query_payload(from, msg, state, :transfer_business_account_stars, fn ->
         Delivery.build_transfer_business_account_stars(%{
@@ -664,25 +802,25 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "get_business_account_gifts"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_business_account_gifts"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_business_account_gifts, fn ->
         Delivery.build_get_business_account_gifts(gift_query_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "get_user_gifts"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_user_gifts"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_user_gifts, fn ->
         Delivery.build_get_user_gifts(gift_query_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "get_chat_gifts"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_chat_gifts"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_chat_gifts, fn ->
         Delivery.build_get_chat_gifts(gift_query_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "convert_gift_to_stars"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "convert_gift_to_stars"} = msg, state),
     do:
       send_query_payload(from, msg, state, :convert_gift_to_stars, fn ->
         Delivery.build_convert_gift_to_stars(%{
@@ -691,7 +829,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "upgrade_gift"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "upgrade_gift"} = msg, state),
     do:
       send_query_payload(from, msg, state, :upgrade_gift, fn ->
         Delivery.build_upgrade_gift(%{
@@ -702,7 +840,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "transfer_gift"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "transfer_gift"} = msg, state),
     do:
       send_query_payload(from, msg, state, :transfer_gift, fn ->
         Delivery.build_transfer_gift(%{
@@ -713,7 +851,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "verify_user"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "verify_user"} = msg, state),
     do:
       send_query_payload(from, msg, state, :verify_user, fn ->
         Delivery.build_verify_user(%{
@@ -722,7 +860,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "verify_chat"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "verify_chat"} = msg, state),
     do:
       send_query_payload(from, msg, state, :verify_chat, fn ->
         Delivery.build_verify_chat(%{
@@ -731,19 +869,19 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "remove_user_verification"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "remove_user_verification"} = msg, state),
     do:
       send_query_payload(from, msg, state, :remove_user_verification, fn ->
         Delivery.build_remove_user_verification(%{user_id: Map.get(msg, "user_id")})
       end)
 
-  defp dispatch(from, %{"action" => "remove_chat_verification"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "remove_chat_verification"} = msg, state),
     do:
       send_query_payload(from, msg, state, :remove_chat_verification, fn ->
         Delivery.build_remove_chat_verification(%{chat_id: Map.get(msg, "chat_id")})
       end)
 
-  defp dispatch(from, %{"action" => "read_business_message"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "read_business_message"} = msg, state),
     do:
       send_query_payload(from, msg, state, :read_business_message, fn ->
         Delivery.build_read_business_message(%{
@@ -753,7 +891,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "delete_business_messages"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "delete_business_messages"} = msg, state),
     do:
       send_query_payload(from, msg, state, :delete_business_messages, fn ->
         Delivery.build_delete_business_messages(%{
@@ -762,7 +900,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "set_business_account_name"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "set_business_account_name"} = msg, state),
     do:
       send_query_payload(from, msg, state, :set_business_account_name, fn ->
         Delivery.build_set_business_account_name(%{
@@ -772,7 +910,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "set_business_account_username"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "set_business_account_username"} = msg, state),
     do:
       send_query_payload(from, msg, state, :set_business_account_username, fn ->
         Delivery.build_set_business_account_username(%{
@@ -781,7 +919,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "set_business_account_bio"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "set_business_account_bio"} = msg, state),
     do:
       send_query_payload(from, msg, state, :set_business_account_bio, fn ->
         Delivery.build_set_business_account_bio(%{
@@ -790,36 +928,48 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "set_business_account_profile_photo"} = msg, state),
-    do:
-      send_query_payload(from, msg, state, :set_business_account_profile_photo, fn ->
-        Delivery.build_set_business_account_profile_photo(%{
-          business_connection_id: Map.get(msg, "business_connection_id"),
-          photo: Map.get(msg, "photo"),
-          is_public: Map.get(msg, "is_public")
-        })
-      end)
+  defp dispatch_authorized(
+         from,
+         %{"action" => "set_business_account_profile_photo"} = msg,
+         state
+       ),
+       do:
+         send_query_payload(from, msg, state, :set_business_account_profile_photo, fn ->
+           Delivery.build_set_business_account_profile_photo(%{
+             business_connection_id: Map.get(msg, "business_connection_id"),
+             photo: Map.get(msg, "photo"),
+             is_public: Map.get(msg, "is_public")
+           })
+         end)
 
-  defp dispatch(from, %{"action" => "remove_business_account_profile_photo"} = msg, state),
-    do:
-      send_query_payload(from, msg, state, :remove_business_account_profile_photo, fn ->
-        Delivery.build_remove_business_account_profile_photo(%{
-          business_connection_id: Map.get(msg, "business_connection_id"),
-          is_public: Map.get(msg, "is_public")
-        })
-      end)
+  defp dispatch_authorized(
+         from,
+         %{"action" => "remove_business_account_profile_photo"} = msg,
+         state
+       ),
+       do:
+         send_query_payload(from, msg, state, :remove_business_account_profile_photo, fn ->
+           Delivery.build_remove_business_account_profile_photo(%{
+             business_connection_id: Map.get(msg, "business_connection_id"),
+             is_public: Map.get(msg, "is_public")
+           })
+         end)
 
-  defp dispatch(from, %{"action" => "set_business_account_gift_settings"} = msg, state),
-    do:
-      send_query_payload(from, msg, state, :set_business_account_gift_settings, fn ->
-        Delivery.build_set_business_account_gift_settings(%{
-          business_connection_id: Map.get(msg, "business_connection_id"),
-          show_gift_button: Map.get(msg, "show_gift_button"),
-          accepted_gift_types: Map.get(msg, "accepted_gift_types")
-        })
-      end)
+  defp dispatch_authorized(
+         from,
+         %{"action" => "set_business_account_gift_settings"} = msg,
+         state
+       ),
+       do:
+         send_query_payload(from, msg, state, :set_business_account_gift_settings, fn ->
+           Delivery.build_set_business_account_gift_settings(%{
+             business_connection_id: Map.get(msg, "business_connection_id"),
+             show_gift_button: Map.get(msg, "show_gift_button"),
+             accepted_gift_types: Map.get(msg, "accepted_gift_types")
+           })
+         end)
 
-  defp dispatch(from, %{"action" => "approve_suggested_post"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "approve_suggested_post"} = msg, state),
     do:
       send_query_payload(from, msg, state, :approve_suggested_post, fn ->
         Delivery.build_approve_suggested_post(%{
@@ -829,7 +979,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "decline_suggested_post"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "decline_suggested_post"} = msg, state),
     do:
       send_query_payload(from, msg, state, :decline_suggested_post, fn ->
         Delivery.build_decline_suggested_post(%{
@@ -839,7 +989,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "set_passport_data_errors"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "set_passport_data_errors"} = msg, state),
     do:
       send_query_payload(from, msg, state, :set_passport_data_errors, fn ->
         Delivery.build_set_passport_data_errors(%{
@@ -848,19 +998,19 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "set_game_score"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "set_game_score"} = msg, state),
     do:
       send_query_payload(from, msg, state, :set_game_score, fn ->
         Delivery.build_set_game_score(game_score_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "get_game_high_scores"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "get_game_high_scores"} = msg, state),
     do:
       send_query_payload(from, msg, state, :get_game_high_scores, fn ->
         Delivery.build_get_game_high_scores(game_score_attrs(msg))
       end)
 
-  defp dispatch(from, %{"action" => "refund_star_payment"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "refund_star_payment"} = msg, state),
     do:
       send_query_payload(from, msg, state, :refund_star_payment, fn ->
         Delivery.build_refund_star_payment(%{
@@ -869,7 +1019,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "edit_user_star_subscription"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "edit_user_star_subscription"} = msg, state),
     do:
       send_query_payload(from, msg, state, :edit_user_star_subscription, fn ->
         Delivery.build_edit_user_star_subscription(%{
@@ -879,7 +1029,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "post_story"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "post_story"} = msg, state),
     do:
       send_query_payload(from, msg, state, :post_story, fn ->
         Delivery.build_post_story(%{
@@ -894,7 +1044,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "repost_story"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "repost_story"} = msg, state),
     do:
       send_query_payload(from, msg, state, :repost_story, fn ->
         Delivery.build_repost_story(%{
@@ -907,7 +1057,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "edit_story"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "edit_story"} = msg, state),
     do:
       send_query_payload(from, msg, state, :edit_story, fn ->
         Delivery.build_edit_story(%{
@@ -920,7 +1070,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "delete_story"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "delete_story"} = msg, state),
     do:
       send_query_payload(from, msg, state, :delete_story, fn ->
         Delivery.build_delete_story(%{
@@ -929,127 +1079,130 @@ defmodule Genswarms.Telegram.Objects.Sender do
         })
       end)
 
-  defp dispatch(from, %{"action" => "send_card"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_card"} = msg, state),
     do: send_card(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "stream_card"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "stream_card"} = msg, state),
     do: stream_card(from, msg, state)
 
-  defp dispatch(from, %{"action" => "edit_card"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "edit_card"} = msg, state),
     do: edit_card(from, msg, state)
 
-  defp dispatch(from, %{"action" => "edit_message"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "edit_message"} = msg, state),
     do: edit_message(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "edit_caption"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "edit_caption"} = msg, state),
     do: edit_caption(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "edit_media"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "edit_media"} = msg, state),
     do: edit_media(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "edit_live_location"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "edit_live_location"} = msg, state),
     do: edit_live_location(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "stop_live_location"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "stop_live_location"} = msg, state),
     do: stop_live_location(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "edit_checklist"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "edit_checklist"} = msg, state),
     do: edit_checklist(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "edit_reply_markup"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "edit_reply_markup"} = msg, state),
     do: edit_reply_markup(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "stop_poll"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "stop_poll"} = msg, state),
     do: stop_poll(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "copy_message"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "copy_message"} = msg, state),
     do: copy_message(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "copy_messages"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "copy_messages"} = msg, state),
     do: copy_messages(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "forward_message"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "forward_message"} = msg, state),
     do: forward_message(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "forward_messages"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "forward_messages"} = msg, state),
     do: forward_messages(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "delete_message"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "delete_message"} = msg, state),
     do: delete_message(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "delete_messages"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "delete_messages"} = msg, state),
     do: delete_messages(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_media"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_media"} = msg, state),
     do: send_media(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_video_note"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_video_note"} = msg, state),
     do: send_video_note(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_live_photo"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_live_photo"} = msg, state),
     do: send_live_photo(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_sticker"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_sticker"} = msg, state),
     do: send_sticker(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_media_group"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_media_group"} = msg, state),
     do: send_media_group(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_paid_media"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_paid_media"} = msg, state),
     do: send_paid_media(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_poll"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_poll"} = msg, state),
     do: send_poll(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_checklist"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_checklist"} = msg, state),
     do: send_checklist(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_invoice"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_invoice"} = msg, state),
     do: send_invoice(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_game"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_game"} = msg, state),
     do: send_game(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_location"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_location"} = msg, state),
     do: send_location(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_venue"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_venue"} = msg, state),
     do: send_venue(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_contact"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_contact"} = msg, state),
     do: send_contact(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_dice"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_dice"} = msg, state),
     do: send_dice(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_chat_action"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_chat_action"} = msg, state),
     do: send_chat_action(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "set_reaction"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "set_reaction"} = msg, state),
     do: set_reaction(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => "send_rich_raw"} = msg, state),
+  defp dispatch_authorized(from, %{"action" => "send_rich_raw"} = msg, state),
     do: send_rich_raw(from, msg, state, :proactive)
 
-  defp dispatch(from, %{"action" => action} = msg, state) when action in @utility_actions do
+  defp dispatch_authorized(from, %{"action" => action} = msg, state)
+       when action in @utility_actions do
     send_query_payload(from, msg, state, String.to_atom(action), fn ->
       build_utility_payload(action, msg)
     end)
   end
 
-  defp dispatch(from, %{"action" => action} = msg, state) when action in @chat_admin_actions do
+  defp dispatch_authorized(from, %{"action" => action} = msg, state)
+       when action in @chat_admin_actions do
     send_query_payload(from, msg, state, String.to_atom(action), fn ->
       build_chat_admin_payload(action, msg)
     end)
   end
 
-  defp dispatch(from, %{"action" => action} = msg, state) when action in @sticker_actions do
+  defp dispatch_authorized(from, %{"action" => action} = msg, state)
+       when action in @sticker_actions do
     send_query_payload(from, msg, state, String.to_atom(action), fn ->
       build_sticker_payload(action, msg)
     end)
   end
 
-  defp dispatch(
+  defp dispatch_authorized(
          from,
          %{"action" => "send_batch", "recipients" => recipients, "text" => text} = msg,
          state
@@ -1070,7 +1223,11 @@ defmodule Genswarms.Telegram.Objects.Sender do
     end
   end
 
-  defp dispatch(from, %{"action" => "slot_reply", "slot" => slot, "content" => content}, state) do
+  defp dispatch_authorized(
+         from,
+         %{"action" => "slot_reply", "slot" => slot, "content" => content},
+         state
+       ) do
     if from in state.slot_reply_sources do
       case Map.get(state.slots, to_string(slot)) do
         nil -> {:error, :unbound_slot, state}
@@ -1081,10 +1238,10 @@ defmodule Genswarms.Telegram.Objects.Sender do
     end
   end
 
-  defp dispatch(_from, %{"action" => "audit"}, state),
+  defp dispatch_authorized(_from, %{"action" => "audit"}, state),
     do: {:reply, %{ok: true, sent: state.sent}, state}
 
-  defp dispatch(_from, _msg, state), do: {:error, :unknown_action, state}
+  defp dispatch_authorized(_from, _msg, state), do: {:error, :unknown_action, state}
 
   defp error_payload({:invalid_payload, message}) do
     %{ok: false, error: "invalid_payload", reason: message}
@@ -1102,7 +1259,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp send_text(from, msg, state, origin) do
     with {:ok, cid} <-
-           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+           resolve_message_target(from, msg, state, state.send_sources),
          {:cont, state} <- prepare_delivery(from, cid, origin, state) do
       text =
         Adapter.call(state.delivery_effects, :redact_outbound, [
@@ -1171,7 +1328,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
         acc = throttle(acc)
         result = dispatch_payload(payload, acc, chunk)
-        {[result | results], record_send(acc, cid, payload, result)}
+        {[result | results], record_send(acc, cid, payload, result, Map.get(meta, :from))}
       end)
 
     result = logical_result(Enum.reverse(results))
@@ -1182,7 +1339,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp send_progress(from, msg, state) do
     with {:ok, cid} <-
-           resolve_target(from, Map.get(msg, "conversation_id"), state, state.progress_sources) do
+           resolve_message_target(from, msg, state, state.progress_sources) do
       text =
         msg
         |> Map.get("text", "")
@@ -1223,7 +1380,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp send_card(from, msg, state, origin) do
     with {:ok, cid} <-
-           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+           resolve_message_target(from, msg, state, state.send_sources),
          {:cont, state} <- prepare_delivery(from, cid, origin, state),
          {:ok, rich_message} <- Card.to_rich_message(Map.get(msg, "card", %{})),
          {:ok, state} <-
@@ -1244,7 +1401,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp stream_card(from, msg, state) do
     with {:ok, cid} <-
-           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+           resolve_message_target(from, msg, state, state.send_sources),
          draft_id when not is_nil(draft_id) <- Map.get(msg, "draft_id"),
          {:ok, rich_message} <- Card.to_rich_message(Map.get(msg, "card", %{}), %{draft?: true}),
          {:ok, payload} <-
@@ -1257,7 +1414,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
            end) do
       state = throttle(state)
       result = dispatch_payload(payload, state, nil)
-      {:ok, record_send(state, cid, payload, result)}
+      {:ok, record_send(state, cid, payload, result, from)}
     else
       nil -> {:error, :missing_draft_id, state}
       {:error, errors} when is_list(errors) -> {:error, {:invalid_card, errors}, state}
@@ -1267,7 +1424,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp stream_text(from, msg, state) do
     with {:ok, cid} <-
-           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+           resolve_message_target(from, msg, state, state.send_sources),
          {:ok, payload} <-
            safe_build_payload(fn ->
              Delivery.build_send_message_draft(%{
@@ -1278,7 +1435,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
            end) do
       state = throttle(state)
       result = dispatch_payload(payload, state, Map.get(msg, "text", ""))
-      {:ok, record_send(state, cid, payload, result)}
+      {:ok, record_send(state, cid, payload, result, from)}
     else
       {:error, reason} -> {:error, reason, state}
     end
@@ -1286,7 +1443,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp edit_card(from, msg, state) do
     with {:ok, cid} <-
-           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+           resolve_message_target(from, msg, state, state.send_sources),
          {:ok, rich_message} <- Card.to_rich_message(Map.get(msg, "card", %{})),
          {:ok, payload} <-
            safe_build_payload(fn ->
@@ -1475,7 +1632,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp send_rich_raw(from, msg, state, origin) do
     with {:ok, cid} <-
-           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+           resolve_message_target(from, msg, state, state.send_sources),
          :ok <- RichMessage.validate(Map.get(msg, "rich_message", %{})),
          {:ok, state} <-
            send_rich_payload(cid, Map.get(msg, "rich_message"), msg, state, %{
@@ -1508,7 +1665,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
     state =
       state
-      |> record_send(cid, payload, result)
+      |> record_send(cid, payload, result, Map.get(meta, :from))
       |> record_logical_delivery(cid, %{rich_message: rich_message}, result, meta)
 
     {:ok, state}
@@ -1516,7 +1673,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp send_media(from, msg, state, origin) do
     with {:ok, cid} <-
-           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+           resolve_message_target(from, msg, state, state.send_sources),
          {:cont, state} <- prepare_delivery(from, cid, origin, state),
          {:ok, payload} <-
            safe_build_payload(fn ->
@@ -1540,7 +1697,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
       state =
         state
-        |> record_send(cid, payload, result)
+        |> record_send(cid, payload, result, from)
         |> record_logical_delivery(
           cid,
           %{media: Map.get(msg, "media") || Map.get(msg, "url")},
@@ -1643,7 +1800,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp send_poll(from, msg, state, origin) do
     with {:ok, cid} <-
-           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+           resolve_message_target(from, msg, state, state.send_sources),
          {:ok, payload} <-
            safe_build_payload(fn ->
              Delivery.build_send_poll(%{
@@ -1675,7 +1832,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
       state =
         state
-        |> record_send(cid, payload, result)
+        |> record_send(cid, payload, result, from)
         |> record_logical_delivery(cid, %{poll: Map.get(msg, "question")}, result, %{
           origin: origin,
           from: from,
@@ -1812,7 +1969,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp send_chat_action(from, msg, state, origin) do
     with {:ok, cid} <-
-           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+           resolve_message_target(from, msg, state, state.send_sources),
          {:ok, payload} <-
            safe_build_payload(fn ->
              Delivery.build_send_chat_action(%{
@@ -1828,7 +1985,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
       state =
         state
-        |> record_send(cid, payload, result)
+        |> record_send(cid, payload, result, from)
         |> record_logical_delivery(cid, %{chat_action: payload.action}, result, %{
           origin: origin,
           from: from,
@@ -1843,7 +2000,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp set_reaction(from, msg, state, origin) do
     with {:ok, cid} <-
-           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+           resolve_message_target(from, msg, state, state.send_sources),
          {:ok, payload} <-
            safe_build_payload(fn ->
              Delivery.build_set_message_reaction(%{
@@ -1873,7 +2030,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp send_built_payload(from, msg, state, origin, logical_kind, builder) do
     with {:ok, cid} <-
-           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+           resolve_message_target(from, msg, state, state.send_sources),
          {:cont, state} <- prepare_delivery(from, cid, origin, state),
          {:ok, payload} <- safe_build_payload(fn -> builder.(cid) end) do
       state = clear_progress(cid, state) |> throttle()
@@ -1881,7 +2038,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
       state =
         state
-        |> record_send(cid, payload, result)
+        |> record_send(cid, payload, result, from)
         |> record_logical_delivery(cid, %{logical_kind => payload}, result, %{
           origin: origin,
           from: from,
@@ -1897,7 +2054,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp send_edit_payload(from, msg, state, origin, logical_kind, builder) do
     with {:ok, cid} <-
-           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+           resolve_message_target(from, msg, state, state.send_sources),
          {:ok, payload} <- safe_build_payload(fn -> builder.(cid) end) do
       state = throttle(state)
       result = dispatch_payload(payload, state, Map.get(msg, "text") || Map.get(msg, "caption"))
@@ -2321,7 +2478,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp send_place(from, msg, state, origin, kind, attrs) do
     with {:ok, cid} <-
-           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+           resolve_message_target(from, msg, state, state.send_sources),
          {:cont, state} <- prepare_delivery(from, cid, origin, state) do
       base =
         attrs
@@ -2347,7 +2504,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
           state =
             state
-            |> record_send(cid, payload, result)
+            |> record_send(cid, payload, result, from)
             |> record_logical_delivery(cid, %{kind => attrs}, result, %{
               origin: origin,
               from: from,
@@ -3002,7 +3159,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
     error in ArgumentError -> {:error, {:invalid_payload, Exception.message(error)}}
   end
 
-  defp record_send(state, cid, payload, result) do
+  defp record_send(state, cid, payload, result, from \\ nil) do
     entry = %{
       conversation_id: cid,
       payload: payload,
@@ -3010,7 +3167,9 @@ defmodule Genswarms.Telegram.Objects.Sender do
       at: System.system_time(:second)
     }
 
-    %{state | sent: Enum.take([entry | state.sent], @audit_max)}
+    state
+    |> Map.put(:sent, Enum.take([entry | state.sent], @audit_max))
+    |> record_own_message(from, cid, result)
   end
 
   defp record_logical_delivery(state, cid, delivery, result, meta) do
@@ -3055,6 +3214,180 @@ defmodule Genswarms.Telegram.Objects.Sender do
   defp unreachable_reason?({:dead_chat, _code, _description}), do: true
   defp unreachable_reason?({:failed, 403, _description}), do: true
   defp unreachable_reason?(_reason), do: false
+
+  defp validate_action_table! do
+    case Enum.reject(interface().actions, &(Actions.classify(&1) != :unknown)) do
+      [] ->
+        :ok
+
+      unknown ->
+        raise ArgumentError,
+              "unclassified Telegram sender actions: #{Enum.map_join(unknown, ", ", &to_string/1)}"
+    end
+  end
+
+  defp normalize_agent_surface(:standard), do: MapSet.new(agent_groups())
+  defp normalize_agent_surface(:none), do: MapSet.new()
+  defp normalize_agent_surface(:cards_only), do: MapSet.new([:core, :cards, :discovery])
+
+  defp normalize_agent_surface(groups) when is_list(groups) do
+    allowed = MapSet.new(agent_groups())
+
+    groups
+    |> Enum.map(&normalize_group/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.filter(&MapSet.member?(allowed, &1))
+    |> MapSet.new()
+  end
+
+  defp normalize_agent_surface(_surface), do: normalize_agent_surface(:standard)
+
+  defp normalize_action_grants(grants) when is_map(grants) do
+    Enum.reduce(grants, %{}, fn {group, sources}, acc ->
+      case normalize_group(group) do
+        nil -> acc
+        group -> Map.put(acc, group, List.wrap(sources))
+      end
+    end)
+  end
+
+  defp normalize_action_grants(_grants), do: %{}
+
+  defp normalize_group(group) when is_atom(group) do
+    if group in Actions.groups(), do: group
+  end
+
+  defp normalize_group(group) when is_binary(group) do
+    Enum.find(Actions.groups(), &(Atom.to_string(&1) == group))
+  end
+
+  defp normalize_group(_group), do: nil
+
+  defp agent_groups do
+    Enum.filter(Actions.groups(), fn group ->
+      Actions.actions_in(group)
+      |> Enum.any?(&(Actions.classify(&1) == {:agent, group}))
+    end)
+  end
+
+  defp agent_group_enabled?(surface, group), do: MapSet.member?(surface, group)
+
+  defp operator_granted?(from, group, state) do
+    from in Map.get(state.action_grants, group, [])
+  end
+
+  defp caller_scope(from, state) do
+    from_s = to_string(from)
+
+    cond do
+      from == :internal ->
+        %{kind: :internal}
+
+      cid = Map.get(state.slots, from_s) ->
+        %{kind: :bound_slot, slot: from_s, cid: cid}
+
+      agent_like?(from_s, state) ->
+        %{kind: :unbound_slot, slot: from_s}
+
+      true ->
+        %{kind: :named_object}
+    end
+  end
+
+  defp delete_action?(action), do: action in ["delete_message", "delete_messages"]
+
+  defp targetless_agent_action?(action, group) do
+    group == :discovery or action == "validate_card"
+  end
+
+  defp authorize_own_message(action, msg, state, %{slot: slot, cid: cid}) do
+    case own_message_ids(action, msg) do
+      {:ok, ids} ->
+        if Enum.all?(ids, &own_message?(state, slot, cid, &1)) do
+          :ok
+        else
+          {:error, :unauthorized_message}
+        end
+
+      :skip ->
+        :ok
+    end
+  end
+
+  defp authorize_own_message(_action, _msg, _state, _caller), do: {:error, :unauthorized_message}
+
+  defp own_message_ids("delete_messages", msg) do
+    msg
+    |> Map.get("message_ids")
+    |> parse_message_ids()
+  end
+
+  defp own_message_ids(_action, msg) do
+    case parse_message_id(Map.get(msg, "message_id")) do
+      {:ok, id} -> {:ok, [id]}
+      :error -> :skip
+    end
+  end
+
+  defp parse_message_ids(ids) when is_list(ids) do
+    parsed =
+      ids
+      |> Enum.map(&parse_message_id/1)
+      |> Enum.flat_map(fn
+        {:ok, id} -> [id]
+        :error -> []
+      end)
+
+    if parsed == [], do: :skip, else: {:ok, parsed}
+  end
+
+  defp parse_message_ids(_ids), do: :skip
+
+  defp parse_message_id(id) when is_integer(id), do: {:ok, id}
+
+  defp parse_message_id(id) when is_binary(id) do
+    case Integer.parse(id) do
+      {int, ""} -> {:ok, int}
+      _other -> :error
+    end
+  end
+
+  defp parse_message_id(_id), do: :error
+
+  defp own_message?(state, slot, cid, message_id) do
+    {cid, message_id} in Map.get(state.own_messages, slot, [])
+  end
+
+  defp record_own_message(state, from, cid, result) do
+    with from when not is_nil(from) <- from,
+         %{kind: :bound_slot, slot: slot} <- caller_scope(from, state),
+         {:ok, message_id} <- message_id_from_result(result),
+         true <- state.own_message_window > 0 do
+      entries =
+        state.own_messages
+        |> Map.get(slot, [])
+        |> Enum.reject(&(&1 == {cid, message_id}))
+        |> then(&[{cid, message_id} | &1])
+        |> Enum.take(state.own_message_window)
+
+      %{state | own_messages: Map.put(state.own_messages, slot, entries)}
+    else
+      _other -> state
+    end
+  end
+
+  defp resolve_message_target(from, msg, state, direct_sources) do
+    case Map.get(msg, @gate_key) do
+      %{class: :operator} ->
+        case Map.get(msg, "conversation_id") do
+          cid when is_binary(cid) and cid != "" -> direct_target(:internal, cid, [:internal])
+          _other -> {:error, :invalid_conversation_id}
+        end
+
+      _gate ->
+        resolve_target(from, Map.get(msg, "conversation_id"), state, direct_sources)
+    end
+  end
 
   defp resolve_target(from, payload_cid, state, direct_sources) do
     from_s = to_string(from)

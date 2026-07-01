@@ -103,7 +103,13 @@ defmodule Genswarms.Telegram.SenderFailureModesTest do
         {:ok, %{"message_id" => 42}}
       ])
 
-    state = Sender.new(%{client: Fake, client_opts: [fake: fake], rate_per_sec: 1_000})
+    state =
+      Sender.new(%{
+        client: Fake,
+        client_opts: [fake: fake],
+        rate_per_sec: 1_000,
+        action_grants: %{infra: [:telegram_ingress]}
+      })
 
     {:noreply, state} =
       Sender.handle_message(
@@ -129,7 +135,14 @@ defmodule Genswarms.Telegram.SenderFailureModesTest do
 
   test "raw rich messages return a structured error when parse fallback text is absent" do
     {:ok, fake} = Fake.start_link([{:error, {:parse_error, "can't parse entities"}}])
-    state = Sender.new(%{client: Fake, client_opts: [fake: fake], rate_per_sec: 1_000})
+
+    state =
+      Sender.new(%{
+        client: Fake,
+        client_opts: [fake: fake],
+        rate_per_sec: 1_000,
+        action_grants: %{infra: [:telegram_ingress]}
+      })
 
     {:noreply, state} =
       Sender.handle_message(
@@ -216,11 +229,15 @@ defmodule Genswarms.Telegram.SenderFailureModesTest do
         client_opts: [fake: fake],
         batch_sources: [:batcher],
         slot_reply_sources: [:slotter],
+        audit_sources: [:auditor],
         rate_per_sec: 1_000
       })
 
-    {:reply, body, state} = Sender.handle_message(:tester, %{"action" => "audit"}, state)
+    {:reply, body, state} = Sender.handle_message(:auditor, %{"action" => "audit"}, state)
     assert Jason.decode!(body)["sent"] == []
+
+    {:reply, body, state} = Sender.handle_message(:tester, %{"action" => "audit"}, state)
+    assert Jason.decode!(body)["error"] == ":unauthorized_audit"
 
     {:reply, body, state} =
       Sender.handle_message(
