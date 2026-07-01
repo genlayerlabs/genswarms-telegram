@@ -3,7 +3,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   Telegram inbound GenSwarms object.
   """
 
-  alias Genswarms.Telegram.{Adapter, Addressing, Client, ConversationId, Delivery, Parser, Poller}
+  alias Genswarms.Telegram.{Adapter, Addressing, Client, ConversationId, Parser, Poller}
   require Logger
 
   def init(config \\ %{}) do
@@ -442,24 +442,22 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   end
 
   defp send_command_reply(event, text, state) do
-    payload = Delivery.build_send_message(%{conversation_id: event.conversation_id, text: text})
+    payload = %{action: "send", conversation_id: event.conversation_id, text: text}
 
-    case Client.send_message(state.client, payload, client_opts(state)) do
-      {:ok, response} ->
-        state = %{
-          state
-          | replies: [
-              %{conversation_id: event.conversation_id, text: text, result: response}
-              | state.replies
-            ]
-        }
+    state = %{
+      state
+      | replies: [
+          %{
+            conversation_id: event.conversation_id,
+            text: text,
+            target: state.sender,
+            routed: true
+          }
+          | state.replies
+        ]
+    }
 
-        {:ok, %{ok: true, command: true, replied: true, conversation_id: event.conversation_id},
-         state}
-
-      {:error, reason} ->
-        {:error, {:command_reply_failed, reason}, state}
-    end
+    {:send, state.sender, encode_payload(payload), state}
   end
 
   defp maybe_init_context(state, conversation_id, workspace) do

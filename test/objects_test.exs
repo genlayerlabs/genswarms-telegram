@@ -662,7 +662,7 @@ defmodule Genswarms.Telegram.ObjectsTest do
     assert text =~ "hello"
   end
 
-  test "ingress sends command router replies through Telegram before acking", %{fake: fake} do
+  test "ingress routes command router replies through the sender", %{fake: fake} do
     {:ok, state} =
       Ingress.init(%{
         bot_token: "token",
@@ -676,21 +676,40 @@ defmodule Genswarms.Telegram.ObjectsTest do
       "message" => %{"chat" => %{"id" => 123}, "text" => "/help"}
     }
 
-    assert {:reply, body, state} =
+    assert {:send, :telegram_sender, payload, state} =
              Ingress.handle_message(
                :test,
                %{"action" => "inject_update", "update" => update},
                state
              )
 
-    decoded = Jason.decode!(body)
-    assert decoded["replied"] == true
-    assert [%{conversation_id: "tg:123:0"}] = state.replies
+    decoded = Jason.decode!(payload)
+    assert decoded["action"] == "send"
+    assert decoded["conversation_id"] == "tg:123:0"
+    assert decoded["text"] =~ "route it to the swarm"
+
+    assert [%{conversation_id: "tg:123:0", target: :telegram_sender, routed: true}] =
+             state.replies
+
+    assert Fake.calls(fake) == []
+
+    sender =
+      Sender.new(%{
+        bot_token: "token",
+        client: Fake,
+        client_opts: [fake: fake],
+        binding_authority: :telegram_ingress,
+        rate_per_sec: 1_000
+      })
+
+    assert {:noreply, sender} = Sender.handle_message(:telegram_ingress, decoded, sender)
 
     [call] = Fake.calls(fake)
     assert call.method == :send_message
     assert call.payload.chat_id == "123"
     assert call.payload.text =~ "route it to the swarm"
+    assert [%{conversation_id: "tg:123:0"}] = sender.sent
+    assert sender.window != []
   end
 
   test "ingress routes leading-whitespace slash commands to command router", %{fake: fake} do
@@ -720,14 +739,15 @@ defmodule Genswarms.Telegram.ObjectsTest do
       "message" => %{"chat" => %{"id" => 123}, "text" => "   /help"}
     }
 
-    {:reply, body, state} =
+    {:send, :telegram_sender, payload, state} =
       Ingress.handle_message(
         :test,
         %{"action" => "inject_update", "update" => leading_update},
         state
       )
 
-    assert Jason.decode!(body)["replied"] == true
+    assert Jason.decode!(payload)["action"] == "send"
+    assert Fake.calls(fake) == []
     refute_receive {:unexpected_command_delivery, _, _}
 
     foreign_update = %{
@@ -1046,9 +1066,7 @@ defmodule Genswarms.Telegram.ObjectsTest do
     assert log =~ "terminated by other getUpdates"
   end
 
-  test "ingress poll does not advance offset or dedupe failed command replies", %{fake: fake} do
-    Fake.push_response(fake, {:error, {:transient, 500, "down"}})
-
+  test "ingress poll emits command replies as sender messages", %{fake: fake} do
     {:ok, state} =
       Ingress.init(%{
         bot_token: "token",
@@ -1063,10 +1081,16 @@ defmodule Genswarms.Telegram.ObjectsTest do
       "message" => %{"chat" => %{"id" => 123}, "text" => "/help"}
     }
 
-    {:noreply, state} = Ingress.handle_info({:telegram_poll_result, {:ok, [update], 31}}, state)
-    assert state.poll_failures == 1
-    assert Genswarms.Telegram.Store.File.read_offset(state.bot_ref) == 0
-    refute Genswarms.Telegram.Store.File.update_seen?(state.bot_ref, 30)
+    {:send_many, [{:send, :telegram_sender, payload}], state} =
+      Ingress.handle_info({:telegram_poll_result, {:ok, [update], 31}}, state)
+
+    decoded = Jason.decode!(payload)
+    assert decoded["action"] == "send"
+    assert decoded["conversation_id"] == "tg:123:0"
+    assert state.poll_failures == 0
+    assert Genswarms.Telegram.Store.File.read_offset(state.bot_ref) == 31
+    assert Genswarms.Telegram.Store.File.update_seen?(state.bot_ref, 30)
+    assert Fake.calls(fake) == []
   end
 
   test "default memory policy does not persist conversation memories", %{fake: fake} do
