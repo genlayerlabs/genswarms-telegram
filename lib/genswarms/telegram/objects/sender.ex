@@ -9,7 +9,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
   configured `Genswarms.Telegram.DeliveryEffects` adapter.
   """
 
-  alias Genswarms.Telegram.{Adapter, Buttons, Client, ConversationId, Delivery}
+  alias Genswarms.Telegram.{Adapter, Buttons, Card, Client, ConversationId, Delivery, RichMessage}
 
   require Logger
 
@@ -20,6 +20,82 @@ defmodule Genswarms.Telegram.Objects.Sender do
   @max_typing_ticks 15
   @progress_text_max 200
   @spam_window_ms 30_000
+  @utility_actions ~w(
+    get_user_profile_photos
+    get_user_profile_audios
+    set_user_emoji_status
+    get_file
+  )
+  @utility_methods Enum.map(@utility_actions, &String.to_atom/1)
+  @chat_admin_actions ~w(
+    delete_message_reaction
+    delete_all_message_reactions
+    ban_chat_member
+    unban_chat_member
+    restrict_chat_member
+    promote_chat_member
+    set_chat_administrator_custom_title
+    set_chat_member_tag
+    ban_chat_sender_chat
+    unban_chat_sender_chat
+    set_chat_permissions
+    export_chat_invite_link
+    create_chat_invite_link
+    edit_chat_invite_link
+    create_chat_subscription_invite_link
+    edit_chat_subscription_invite_link
+    revoke_chat_invite_link
+    approve_chat_join_request
+    decline_chat_join_request
+    answer_chat_join_request_query
+    send_chat_join_request_web_app
+    set_chat_photo
+    delete_chat_photo
+    set_chat_title
+    set_chat_description
+    pin_chat_message
+    unpin_chat_message
+    unpin_all_chat_messages
+    leave_chat
+    get_chat
+    get_chat_administrators
+    get_chat_member_count
+    get_chat_member
+    set_chat_sticker_set
+    delete_chat_sticker_set
+    get_forum_topic_icon_stickers
+    create_forum_topic
+    edit_forum_topic
+    close_forum_topic
+    reopen_forum_topic
+    delete_forum_topic
+    unpin_all_forum_topic_messages
+    edit_general_forum_topic
+    close_general_forum_topic
+    reopen_general_forum_topic
+    hide_general_forum_topic
+    unhide_general_forum_topic
+    unpin_all_general_forum_topic_messages
+  )
+  @chat_admin_methods Enum.map(@chat_admin_actions, &String.to_atom/1)
+  @sticker_actions ~w(
+    get_sticker_set
+    get_custom_emoji_stickers
+    upload_sticker_file
+    create_new_sticker_set
+    add_sticker_to_set
+    set_sticker_position_in_set
+    delete_sticker_from_set
+    replace_sticker_in_set
+    set_sticker_emoji_list
+    set_sticker_keywords
+    set_sticker_mask_position
+    set_sticker_set_title
+    set_sticker_set_thumbnail
+    set_custom_emoji_sticker_set_thumbnail
+    delete_sticker_set
+  )
+  @sticker_methods Enum.map(@sticker_actions, &String.to_atom/1)
 
   def init(config \\ %{}) do
     {:ok, new(config)}
@@ -70,7 +146,8 @@ defmodule Genswarms.Telegram.Objects.Sender do
   def interface do
     %{
       actions:
-        ~w(reply send send_batch progress typing bind_session unbind_session audit slot_reply)
+        ~w(reply send send_batch progress typing bind_session unbind_session audit slot_reply capabilities examples validate_card stream_text answer_callback answer_web_app answer_inline_query answer_guest_query save_prepared_inline_message save_prepared_keyboard_button get_user_chat_boosts get_business_connection get_managed_bot_token replace_managed_bot_token get_managed_bot_access_settings set_managed_bot_access_settings get_user_personal_chat_messages set_my_commands delete_my_commands get_my_commands set_my_name get_my_name set_my_description get_my_description set_my_short_description get_my_short_description set_my_profile_photo remove_my_profile_photo set_chat_menu_button get_chat_menu_button set_my_default_administrator_rights get_my_default_administrator_rights create_invoice_link answer_shipping_query answer_pre_checkout_query get_my_star_balance get_star_transactions get_available_gifts send_gift gift_premium_subscription get_business_account_star_balance transfer_business_account_stars get_business_account_gifts get_user_gifts get_chat_gifts convert_gift_to_stars upgrade_gift transfer_gift verify_user verify_chat remove_user_verification remove_chat_verification read_business_message delete_business_messages set_business_account_name set_business_account_username set_business_account_bio set_business_account_profile_photo remove_business_account_profile_photo set_business_account_gift_settings approve_suggested_post decline_suggested_post set_passport_data_errors set_game_score get_game_high_scores refund_star_payment edit_user_star_subscription post_story repost_story edit_story delete_story send_card stream_card edit_card edit_message edit_caption edit_media edit_live_location stop_live_location edit_checklist edit_reply_markup stop_poll copy_message copy_messages forward_message forward_messages delete_message delete_messages send_media send_video_note send_live_photo send_sticker send_media_group send_paid_media send_poll send_checklist send_invoice send_game send_location send_venue send_contact send_dice send_chat_action set_reaction send_rich_raw) ++
+          @utility_actions ++ @chat_admin_actions ++ @sticker_actions
     }
   end
 
@@ -104,7 +181,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         {:reply, Jason.encode!(reply), state}
 
       {:error, reason, state} ->
-        {:reply, Jason.encode!(%{ok: false, error: inspect(reason)}), state}
+        {:reply, Jason.encode!(error_payload(reason)), state}
 
       {:error, _reason} ->
         {:noreply, state}
@@ -245,6 +322,733 @@ defmodule Genswarms.Telegram.Objects.Sender do
   defp dispatch(from, %{"action" => "send"} = msg, state),
     do: send_text(from, msg, state, :proactive)
 
+  defp dispatch(_from, %{"action" => "capabilities"}, state),
+    do: {:reply, %{ok: true, capabilities: Card.capabilities()}, state}
+
+  defp dispatch(_from, %{"action" => "examples"}, state),
+    do: {:reply, %{ok: true, examples: Card.examples()}, state}
+
+  defp dispatch(_from, %{"action" => "validate_card", "card" => card} = msg, state) do
+    opts = if truthy?(Map.get(msg, "draft")), do: %{draft?: true}, else: %{}
+
+    case Card.validate(card, opts) do
+      :ok -> {:reply, %{ok: true}, state}
+      {:error, errors} -> {:reply, %{ok: false, error: "invalid_card", errors: errors}, state}
+    end
+  end
+
+  defp dispatch(from, %{"action" => "stream_text"} = msg, state),
+    do: stream_text(from, msg, state)
+
+  defp dispatch(from, %{"action" => "answer_callback"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :answer_callback, fn ->
+        Delivery.build_answer_callback_query(%{
+          callback_query_id: Map.get(msg, "callback_query_id"),
+          text: Map.get(msg, "text"),
+          show_alert: Map.get(msg, "show_alert"),
+          url: Map.get(msg, "url"),
+          cache_time: Map.get(msg, "cache_time")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "answer_web_app"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :answer_web_app, fn ->
+        Delivery.build_answer_web_app_query(%{
+          web_app_query_id: Map.get(msg, "web_app_query_id"),
+          result: Map.get(msg, "result")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "answer_inline_query"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :answer_inline_query, fn ->
+        Delivery.build_answer_inline_query(%{
+          inline_query_id: Map.get(msg, "inline_query_id"),
+          results: Map.get(msg, "results"),
+          cache_time: Map.get(msg, "cache_time"),
+          is_personal: Map.get(msg, "is_personal"),
+          next_offset: Map.get(msg, "next_offset"),
+          button: Map.get(msg, "button")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "answer_guest_query"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :answer_guest_query, fn ->
+        Delivery.build_answer_guest_query(%{
+          guest_query_id: Map.get(msg, "guest_query_id"),
+          result: Map.get(msg, "result")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "save_prepared_inline_message"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :save_prepared_inline_message, fn ->
+        Delivery.build_save_prepared_inline_message(%{
+          user_id: Map.get(msg, "user_id"),
+          result: Map.get(msg, "result"),
+          allow_user_chats: Map.get(msg, "allow_user_chats"),
+          allow_bot_chats: Map.get(msg, "allow_bot_chats"),
+          allow_group_chats: Map.get(msg, "allow_group_chats"),
+          allow_channel_chats: Map.get(msg, "allow_channel_chats")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "save_prepared_keyboard_button"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :save_prepared_keyboard_button, fn ->
+        Delivery.build_save_prepared_keyboard_button(%{
+          user_id: Map.get(msg, "user_id"),
+          button: Map.get(msg, "button")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "get_user_chat_boosts"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_user_chat_boosts, fn ->
+        Delivery.build_get_user_chat_boosts(%{
+          chat_id: Map.get(msg, "chat_id"),
+          user_id: Map.get(msg, "user_id")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "get_business_connection"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_business_connection, fn ->
+        Delivery.build_get_business_connection(%{
+          business_connection_id: Map.get(msg, "business_connection_id")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "get_managed_bot_token"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_managed_bot_token, fn ->
+        Delivery.build_get_managed_bot_token(%{user_id: Map.get(msg, "user_id")})
+      end)
+
+  defp dispatch(from, %{"action" => "replace_managed_bot_token"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :replace_managed_bot_token, fn ->
+        Delivery.build_replace_managed_bot_token(%{user_id: Map.get(msg, "user_id")})
+      end)
+
+  defp dispatch(from, %{"action" => "get_managed_bot_access_settings"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_managed_bot_access_settings, fn ->
+        Delivery.build_get_managed_bot_access_settings(%{user_id: Map.get(msg, "user_id")})
+      end)
+
+  defp dispatch(from, %{"action" => "set_managed_bot_access_settings"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_managed_bot_access_settings, fn ->
+        Delivery.build_set_managed_bot_access_settings(%{
+          user_id: Map.get(msg, "user_id"),
+          is_access_restricted: Map.get(msg, "is_access_restricted"),
+          added_user_ids: Map.get(msg, "added_user_ids")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "get_user_personal_chat_messages"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_user_personal_chat_messages, fn ->
+        Delivery.build_get_user_personal_chat_messages(%{
+          user_id: Map.get(msg, "user_id"),
+          limit: Map.get(msg, "limit")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "set_my_commands"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_my_commands, fn ->
+        Delivery.build_set_my_commands(bot_profile_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "delete_my_commands"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :delete_my_commands, fn ->
+        Delivery.build_delete_my_commands(bot_profile_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "get_my_commands"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_my_commands, fn ->
+        Delivery.build_get_my_commands(bot_profile_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "set_my_name"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_my_name, fn ->
+        Delivery.build_set_my_name(bot_profile_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "get_my_name"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_my_name, fn ->
+        Delivery.build_get_my_name(bot_profile_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "set_my_description"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_my_description, fn ->
+        Delivery.build_set_my_description(bot_profile_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "get_my_description"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_my_description, fn ->
+        Delivery.build_get_my_description(bot_profile_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "set_my_short_description"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_my_short_description, fn ->
+        Delivery.build_set_my_short_description(bot_profile_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "get_my_short_description"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_my_short_description, fn ->
+        Delivery.build_get_my_short_description(bot_profile_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "set_my_profile_photo"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_my_profile_photo, fn ->
+        Delivery.build_set_my_profile_photo(%{photo: Map.get(msg, "photo")})
+      end)
+
+  defp dispatch(from, %{"action" => "remove_my_profile_photo"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :remove_my_profile_photo, fn ->
+        Delivery.build_remove_my_profile_photo()
+      end)
+
+  defp dispatch(from, %{"action" => "set_chat_menu_button"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_chat_menu_button, fn ->
+        Delivery.build_set_chat_menu_button(bot_profile_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "get_chat_menu_button"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_chat_menu_button, fn ->
+        Delivery.build_get_chat_menu_button(bot_profile_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "set_my_default_administrator_rights"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_my_default_administrator_rights, fn ->
+        Delivery.build_set_my_default_administrator_rights(bot_profile_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "get_my_default_administrator_rights"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_my_default_administrator_rights, fn ->
+        Delivery.build_get_my_default_administrator_rights(bot_profile_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "create_invoice_link"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :create_invoice_link, fn ->
+        Delivery.build_create_invoice_link(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          title: Map.get(msg, "title"),
+          description: Map.get(msg, "description"),
+          payload: Map.get(msg, "payload"),
+          provider_token: Map.get(msg, "provider_token"),
+          currency: Map.get(msg, "currency"),
+          prices: Map.get(msg, "prices"),
+          subscription_period: Map.get(msg, "subscription_period"),
+          max_tip_amount: Map.get(msg, "max_tip_amount"),
+          suggested_tip_amounts: Map.get(msg, "suggested_tip_amounts"),
+          provider_data: Map.get(msg, "provider_data"),
+          photo_url: Map.get(msg, "photo_url"),
+          photo_size: Map.get(msg, "photo_size"),
+          photo_width: Map.get(msg, "photo_width"),
+          photo_height: Map.get(msg, "photo_height"),
+          need_name: Map.get(msg, "need_name"),
+          need_phone_number: Map.get(msg, "need_phone_number"),
+          need_email: Map.get(msg, "need_email"),
+          need_shipping_address: Map.get(msg, "need_shipping_address"),
+          send_phone_number_to_provider: Map.get(msg, "send_phone_number_to_provider"),
+          send_email_to_provider: Map.get(msg, "send_email_to_provider"),
+          is_flexible: Map.get(msg, "is_flexible")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "answer_shipping_query"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :answer_shipping_query, fn ->
+        Delivery.build_answer_shipping_query(%{
+          shipping_query_id: Map.get(msg, "shipping_query_id"),
+          ok: Map.get(msg, "ok"),
+          shipping_options: Map.get(msg, "shipping_options"),
+          error_message: Map.get(msg, "error_message")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "answer_pre_checkout_query"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :answer_pre_checkout_query, fn ->
+        Delivery.build_answer_pre_checkout_query(%{
+          pre_checkout_query_id: Map.get(msg, "pre_checkout_query_id"),
+          ok: Map.get(msg, "ok"),
+          error_message: Map.get(msg, "error_message")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "get_my_star_balance"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_my_star_balance, fn ->
+        Delivery.build_get_my_star_balance()
+      end)
+
+  defp dispatch(from, %{"action" => "get_star_transactions"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_star_transactions, fn ->
+        Delivery.build_get_star_transactions(%{
+          offset: Map.get(msg, "offset"),
+          limit: Map.get(msg, "limit")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "get_available_gifts"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_available_gifts, fn ->
+        Delivery.build_get_available_gifts()
+      end)
+
+  defp dispatch(from, %{"action" => "send_gift"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :send_gift, fn ->
+        Delivery.build_send_gift(%{
+          user_id: Map.get(msg, "user_id"),
+          chat_id: Map.get(msg, "chat_id"),
+          gift_id: Map.get(msg, "gift_id"),
+          pay_for_upgrade: Map.get(msg, "pay_for_upgrade"),
+          text: Map.get(msg, "text"),
+          text_parse_mode: Map.get(msg, "text_parse_mode") || Map.get(msg, "parse_mode"),
+          text_entities: Map.get(msg, "text_entities")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "gift_premium_subscription"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :gift_premium_subscription, fn ->
+        Delivery.build_gift_premium_subscription(%{
+          user_id: Map.get(msg, "user_id"),
+          month_count: Map.get(msg, "month_count"),
+          star_count: Map.get(msg, "star_count"),
+          text: Map.get(msg, "text"),
+          text_parse_mode: Map.get(msg, "text_parse_mode") || Map.get(msg, "parse_mode"),
+          text_entities: Map.get(msg, "text_entities")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "get_business_account_star_balance"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_business_account_star_balance, fn ->
+        Delivery.build_get_business_account_star_balance(%{
+          business_connection_id: Map.get(msg, "business_connection_id")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "transfer_business_account_stars"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :transfer_business_account_stars, fn ->
+        Delivery.build_transfer_business_account_stars(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          star_count: Map.get(msg, "star_count")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "get_business_account_gifts"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_business_account_gifts, fn ->
+        Delivery.build_get_business_account_gifts(gift_query_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "get_user_gifts"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_user_gifts, fn ->
+        Delivery.build_get_user_gifts(gift_query_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "get_chat_gifts"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_chat_gifts, fn ->
+        Delivery.build_get_chat_gifts(gift_query_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "convert_gift_to_stars"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :convert_gift_to_stars, fn ->
+        Delivery.build_convert_gift_to_stars(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          owned_gift_id: Map.get(msg, "owned_gift_id")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "upgrade_gift"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :upgrade_gift, fn ->
+        Delivery.build_upgrade_gift(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          owned_gift_id: Map.get(msg, "owned_gift_id"),
+          keep_original_details: Map.get(msg, "keep_original_details"),
+          star_count: Map.get(msg, "star_count")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "transfer_gift"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :transfer_gift, fn ->
+        Delivery.build_transfer_gift(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          owned_gift_id: Map.get(msg, "owned_gift_id"),
+          new_owner_chat_id: Map.get(msg, "new_owner_chat_id"),
+          star_count: Map.get(msg, "star_count")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "verify_user"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :verify_user, fn ->
+        Delivery.build_verify_user(%{
+          user_id: Map.get(msg, "user_id"),
+          custom_description: Map.get(msg, "custom_description")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "verify_chat"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :verify_chat, fn ->
+        Delivery.build_verify_chat(%{
+          chat_id: Map.get(msg, "chat_id"),
+          custom_description: Map.get(msg, "custom_description")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "remove_user_verification"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :remove_user_verification, fn ->
+        Delivery.build_remove_user_verification(%{user_id: Map.get(msg, "user_id")})
+      end)
+
+  defp dispatch(from, %{"action" => "remove_chat_verification"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :remove_chat_verification, fn ->
+        Delivery.build_remove_chat_verification(%{chat_id: Map.get(msg, "chat_id")})
+      end)
+
+  defp dispatch(from, %{"action" => "read_business_message"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :read_business_message, fn ->
+        Delivery.build_read_business_message(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          chat_id: Map.get(msg, "chat_id"),
+          message_id: Map.get(msg, "message_id")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "delete_business_messages"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :delete_business_messages, fn ->
+        Delivery.build_delete_business_messages(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          message_ids: Map.get(msg, "message_ids")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "set_business_account_name"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_business_account_name, fn ->
+        Delivery.build_set_business_account_name(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          first_name: Map.get(msg, "first_name"),
+          last_name: Map.get(msg, "last_name")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "set_business_account_username"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_business_account_username, fn ->
+        Delivery.build_set_business_account_username(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          username: Map.get(msg, "username")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "set_business_account_bio"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_business_account_bio, fn ->
+        Delivery.build_set_business_account_bio(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          bio: Map.get(msg, "bio")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "set_business_account_profile_photo"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_business_account_profile_photo, fn ->
+        Delivery.build_set_business_account_profile_photo(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          photo: Map.get(msg, "photo"),
+          is_public: Map.get(msg, "is_public")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "remove_business_account_profile_photo"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :remove_business_account_profile_photo, fn ->
+        Delivery.build_remove_business_account_profile_photo(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          is_public: Map.get(msg, "is_public")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "set_business_account_gift_settings"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_business_account_gift_settings, fn ->
+        Delivery.build_set_business_account_gift_settings(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          show_gift_button: Map.get(msg, "show_gift_button"),
+          accepted_gift_types: Map.get(msg, "accepted_gift_types")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "approve_suggested_post"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :approve_suggested_post, fn ->
+        Delivery.build_approve_suggested_post(%{
+          chat_id: Map.get(msg, "chat_id"),
+          message_id: Map.get(msg, "message_id"),
+          send_date: Map.get(msg, "send_date")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "decline_suggested_post"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :decline_suggested_post, fn ->
+        Delivery.build_decline_suggested_post(%{
+          chat_id: Map.get(msg, "chat_id"),
+          message_id: Map.get(msg, "message_id"),
+          comment: Map.get(msg, "comment")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "set_passport_data_errors"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_passport_data_errors, fn ->
+        Delivery.build_set_passport_data_errors(%{
+          user_id: Map.get(msg, "user_id"),
+          errors: Map.get(msg, "errors")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "set_game_score"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :set_game_score, fn ->
+        Delivery.build_set_game_score(game_score_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "get_game_high_scores"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :get_game_high_scores, fn ->
+        Delivery.build_get_game_high_scores(game_score_attrs(msg))
+      end)
+
+  defp dispatch(from, %{"action" => "refund_star_payment"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :refund_star_payment, fn ->
+        Delivery.build_refund_star_payment(%{
+          user_id: Map.get(msg, "user_id"),
+          telegram_payment_charge_id: Map.get(msg, "telegram_payment_charge_id")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "edit_user_star_subscription"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :edit_user_star_subscription, fn ->
+        Delivery.build_edit_user_star_subscription(%{
+          user_id: Map.get(msg, "user_id"),
+          telegram_payment_charge_id: Map.get(msg, "telegram_payment_charge_id"),
+          is_canceled: Map.get(msg, "is_canceled")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "post_story"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :post_story, fn ->
+        Delivery.build_post_story(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          content: Map.get(msg, "content"),
+          active_period: Map.get(msg, "active_period"),
+          caption: Map.get(msg, "caption") || Map.get(msg, "text"),
+          caption_entities: Map.get(msg, "caption_entities"),
+          areas: Map.get(msg, "areas"),
+          post_to_chat_page: Map.get(msg, "post_to_chat_page"),
+          protect_content: Map.get(msg, "protect_content")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "repost_story"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :repost_story, fn ->
+        Delivery.build_repost_story(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          from_chat_id: Map.get(msg, "from_chat_id"),
+          from_story_id: Map.get(msg, "from_story_id"),
+          active_period: Map.get(msg, "active_period"),
+          post_to_chat_page: Map.get(msg, "post_to_chat_page"),
+          protect_content: Map.get(msg, "protect_content")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "edit_story"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :edit_story, fn ->
+        Delivery.build_edit_story(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          story_id: Map.get(msg, "story_id"),
+          content: Map.get(msg, "content"),
+          caption: Map.get(msg, "caption") || Map.get(msg, "text"),
+          caption_entities: Map.get(msg, "caption_entities"),
+          areas: Map.get(msg, "areas")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "delete_story"} = msg, state),
+    do:
+      send_query_payload(from, msg, state, :delete_story, fn ->
+        Delivery.build_delete_story(%{
+          business_connection_id: Map.get(msg, "business_connection_id"),
+          story_id: Map.get(msg, "story_id")
+        })
+      end)
+
+  defp dispatch(from, %{"action" => "send_card"} = msg, state),
+    do: send_card(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "stream_card"} = msg, state),
+    do: stream_card(from, msg, state)
+
+  defp dispatch(from, %{"action" => "edit_card"} = msg, state),
+    do: edit_card(from, msg, state)
+
+  defp dispatch(from, %{"action" => "edit_message"} = msg, state),
+    do: edit_message(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "edit_caption"} = msg, state),
+    do: edit_caption(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "edit_media"} = msg, state),
+    do: edit_media(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "edit_live_location"} = msg, state),
+    do: edit_live_location(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "stop_live_location"} = msg, state),
+    do: stop_live_location(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "edit_checklist"} = msg, state),
+    do: edit_checklist(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "edit_reply_markup"} = msg, state),
+    do: edit_reply_markup(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "stop_poll"} = msg, state),
+    do: stop_poll(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "copy_message"} = msg, state),
+    do: copy_message(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "copy_messages"} = msg, state),
+    do: copy_messages(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "forward_message"} = msg, state),
+    do: forward_message(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "forward_messages"} = msg, state),
+    do: forward_messages(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "delete_message"} = msg, state),
+    do: delete_message(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "delete_messages"} = msg, state),
+    do: delete_messages(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_media"} = msg, state),
+    do: send_media(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_video_note"} = msg, state),
+    do: send_video_note(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_live_photo"} = msg, state),
+    do: send_live_photo(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_sticker"} = msg, state),
+    do: send_sticker(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_media_group"} = msg, state),
+    do: send_media_group(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_paid_media"} = msg, state),
+    do: send_paid_media(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_poll"} = msg, state),
+    do: send_poll(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_checklist"} = msg, state),
+    do: send_checklist(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_invoice"} = msg, state),
+    do: send_invoice(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_game"} = msg, state),
+    do: send_game(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_location"} = msg, state),
+    do: send_location(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_venue"} = msg, state),
+    do: send_venue(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_contact"} = msg, state),
+    do: send_contact(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_dice"} = msg, state),
+    do: send_dice(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_chat_action"} = msg, state),
+    do: send_chat_action(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "set_reaction"} = msg, state),
+    do: set_reaction(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => "send_rich_raw"} = msg, state),
+    do: send_rich_raw(from, msg, state, :proactive)
+
+  defp dispatch(from, %{"action" => action} = msg, state) when action in @utility_actions do
+    send_query_payload(from, msg, state, String.to_atom(action), fn ->
+      build_utility_payload(action, msg)
+    end)
+  end
+
+  defp dispatch(from, %{"action" => action} = msg, state) when action in @chat_admin_actions do
+    send_query_payload(from, msg, state, String.to_atom(action), fn ->
+      build_chat_admin_payload(action, msg)
+    end)
+  end
+
+  defp dispatch(from, %{"action" => action} = msg, state) when action in @sticker_actions do
+    send_query_payload(from, msg, state, String.to_atom(action), fn ->
+      build_sticker_payload(action, msg)
+    end)
+  end
+
   defp dispatch(
          from,
          %{"action" => "send_batch", "recipients" => recipients, "text" => text} = msg,
@@ -281,6 +1085,20 @@ defmodule Genswarms.Telegram.Objects.Sender do
     do: {:reply, %{ok: true, sent: state.sent}, state}
 
   defp dispatch(_from, _msg, state), do: {:error, :unknown_action, state}
+
+  defp error_payload({:invalid_payload, message}) do
+    %{ok: false, error: "invalid_payload", reason: message}
+  end
+
+  defp error_payload({:invalid_card, errors}) do
+    %{ok: false, error: "invalid_card", errors: errors}
+  end
+
+  defp error_payload({:invalid_rich_message, error}) do
+    %{ok: false, error: "invalid_rich_message", reason: error}
+  end
+
+  defp error_payload(reason), do: %{ok: false, error: inspect(reason)}
 
   defp send_text(from, msg, state, origin) do
     with {:ok, cid} <-
@@ -328,7 +1146,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
     chunks = Delivery.chunk_text(text)
     last = length(chunks) - 1
     reply_to = validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state)
-    buttons = Buttons.normalize(Map.get(msg, "buttons"))
+    reply_markup = message_reply_markup(msg)
     photo = photo_for_text(Map.get(msg, "photo"), text)
 
     {results, state} =
@@ -339,7 +1157,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
           conversation_id: cid,
           text: chunk,
           reply_to_message_id: if(idx == 0, do: reply_to),
-          buttons: if(idx == last, do: buttons)
+          reply_markup: if(idx == last, do: reply_markup)
         }
 
         payload =
@@ -399,6 +1217,1150 @@ defmodule Genswarms.Telegram.Objects.Sender do
           end
       end
     else
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp send_card(from, msg, state, origin) do
+    with {:ok, cid} <-
+           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+         {:cont, state} <- prepare_delivery(from, cid, origin, state),
+         {:ok, rich_message} <- Card.to_rich_message(Map.get(msg, "card", %{})),
+         {:ok, state} <-
+           send_rich_payload(
+             cid,
+             rich_message,
+             Map.merge(msg, %{"buttons" => card_buttons(msg)}),
+             state,
+             %{origin: origin, from: from, mark: Map.get(msg, "mark")}
+           ) do
+      {:ok, stamp_reply(state, cid, origin)}
+    else
+      {:suppress, state} -> {:ok, state}
+      {:error, errors} when is_list(errors) -> {:error, {:invalid_card, errors}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp stream_card(from, msg, state) do
+    with {:ok, cid} <-
+           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+         draft_id when not is_nil(draft_id) <- Map.get(msg, "draft_id"),
+         {:ok, rich_message} <- Card.to_rich_message(Map.get(msg, "card", %{}), %{draft?: true}),
+         {:ok, payload} <-
+           safe_build_payload(fn ->
+             Delivery.build_send_rich_message_draft(%{
+               conversation_id: cid,
+               draft_id: draft_id,
+               rich_message: rich_message
+             })
+           end) do
+      state = throttle(state)
+      result = dispatch_payload(payload, state, nil)
+      {:ok, record_send(state, cid, payload, result)}
+    else
+      nil -> {:error, :missing_draft_id, state}
+      {:error, errors} when is_list(errors) -> {:error, {:invalid_card, errors}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp stream_text(from, msg, state) do
+    with {:ok, cid} <-
+           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+         {:ok, payload} <-
+           safe_build_payload(fn ->
+             Delivery.build_send_message_draft(%{
+               conversation_id: cid,
+               draft_id: Map.get(msg, "draft_id"),
+               text: Map.get(msg, "text", "")
+             })
+           end) do
+      state = throttle(state)
+      result = dispatch_payload(payload, state, Map.get(msg, "text", ""))
+      {:ok, record_send(state, cid, payload, result)}
+    else
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp edit_card(from, msg, state) do
+    with {:ok, cid} <-
+           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+         {:ok, rich_message} <- Card.to_rich_message(Map.get(msg, "card", %{})),
+         {:ok, payload} <-
+           safe_build_payload(fn ->
+             Delivery.build_edit_rich_message(%{
+               conversation_id: cid,
+               message_id: Map.get(msg, "message_id"),
+               rich_message: rich_message,
+               buttons: Buttons.normalize(Map.get(msg, "buttons"))
+             })
+           end) do
+      state = throttle(state)
+      result = dispatch_payload(payload, state, nil)
+      {:ok, record_send(state, cid, payload, result)}
+    else
+      {:error, errors} when is_list(errors) -> {:error, {:invalid_card, errors}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp edit_message(from, msg, state, origin) do
+    send_edit_payload(from, msg, state, origin, :edit_message, fn cid ->
+      Delivery.build_edit_message_text(%{
+        conversation_id: cid,
+        message_id: Map.get(msg, "message_id"),
+        text: Map.get(msg, "text"),
+        reply_markup: inline_message_reply_markup(msg),
+        link_preview_options: Map.get(msg, "link_preview_options")
+      })
+    end)
+  end
+
+  defp edit_caption(from, msg, state, origin) do
+    send_edit_payload(from, msg, state, origin, :edit_caption, fn cid ->
+      Delivery.build_edit_message_caption(%{
+        conversation_id: cid,
+        message_id: Map.get(msg, "message_id"),
+        caption: Map.get(msg, "caption") || Map.get(msg, "text"),
+        show_caption_above_media: Map.get(msg, "show_caption_above_media"),
+        reply_markup: inline_message_reply_markup(msg)
+      })
+    end)
+  end
+
+  defp edit_media(from, msg, state, origin) do
+    send_edit_payload(from, msg, state, origin, :edit_media, fn cid ->
+      Delivery.build_edit_message_media(%{
+        conversation_id: cid,
+        message_id: Map.get(msg, "message_id"),
+        media_type: Map.get(msg, "media_type"),
+        media: Map.get(msg, "media") || Map.get(msg, "url"),
+        reply_markup: inline_message_reply_markup(msg)
+      })
+    end)
+  end
+
+  defp edit_live_location(from, msg, state, origin) do
+    send_edit_payload(from, msg, state, origin, :edit_live_location, fn cid ->
+      Delivery.build_edit_live_location(%{
+        conversation_id: cid,
+        message_id: Map.get(msg, "message_id"),
+        latitude: Map.get(msg, "latitude"),
+        longitude: Map.get(msg, "longitude"),
+        horizontal_accuracy: Map.get(msg, "horizontal_accuracy"),
+        heading: Map.get(msg, "heading"),
+        proximity_alert_radius: Map.get(msg, "proximity_alert_radius"),
+        reply_markup: inline_message_reply_markup(msg)
+      })
+    end)
+  end
+
+  defp stop_live_location(from, msg, state, origin) do
+    send_edit_payload(from, msg, state, origin, :stop_live_location, fn cid ->
+      Delivery.build_stop_live_location(%{
+        conversation_id: cid,
+        message_id: Map.get(msg, "message_id"),
+        reply_markup: inline_message_reply_markup(msg)
+      })
+    end)
+  end
+
+  defp edit_checklist(from, msg, state, origin) do
+    send_edit_payload(from, msg, state, origin, :edit_checklist, fn cid ->
+      Delivery.build_edit_message_checklist(%{
+        conversation_id: cid,
+        message_id: Map.get(msg, "message_id"),
+        business_connection_id: Map.get(msg, "business_connection_id"),
+        checklist: Map.get(msg, "checklist"),
+        title: Map.get(msg, "title"),
+        tasks: Map.get(msg, "tasks"),
+        reply_markup: inline_message_reply_markup(msg)
+      })
+    end)
+  end
+
+  defp edit_reply_markup(from, msg, state, origin) do
+    send_edit_payload(from, msg, state, origin, :edit_reply_markup, fn cid ->
+      Delivery.build_edit_message_reply_markup(%{
+        conversation_id: cid,
+        message_id: Map.get(msg, "message_id"),
+        reply_markup: inline_message_reply_markup(msg)
+      })
+    end)
+  end
+
+  defp copy_message(from, msg, state, origin) do
+    send_built_payload(from, msg, state, origin, :copy_message, fn cid ->
+      Delivery.build_copy_message(%{
+        conversation_id: cid,
+        from_chat_id: Map.get(msg, "from_chat_id"),
+        message_id: Map.get(msg, "message_id"),
+        caption: Map.get(msg, "caption") || Map.get(msg, "text"),
+        show_caption_above_media: Map.get(msg, "show_caption_above_media"),
+        video_start_timestamp: Map.get(msg, "video_start_timestamp"),
+        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
+        reply_markup: message_reply_markup(msg),
+        disable_notification: Map.get(msg, "disable_notification"),
+        protect_content: Map.get(msg, "protect_content")
+      })
+    end)
+  end
+
+  defp copy_messages(from, msg, state, origin) do
+    send_built_payload(from, msg, state, origin, :copy_messages, fn cid ->
+      Delivery.build_copy_messages(%{
+        conversation_id: cid,
+        from_chat_id: Map.get(msg, "from_chat_id"),
+        message_ids: Map.get(msg, "message_ids"),
+        disable_notification: Map.get(msg, "disable_notification"),
+        protect_content: Map.get(msg, "protect_content")
+      })
+    end)
+  end
+
+  defp forward_message(from, msg, state, origin) do
+    send_built_payload(from, msg, state, origin, :forward_message, fn cid ->
+      Delivery.build_forward_message(%{
+        conversation_id: cid,
+        from_chat_id: Map.get(msg, "from_chat_id"),
+        message_id: Map.get(msg, "message_id"),
+        video_start_timestamp: Map.get(msg, "video_start_timestamp"),
+        disable_notification: Map.get(msg, "disable_notification"),
+        protect_content: Map.get(msg, "protect_content")
+      })
+    end)
+  end
+
+  defp forward_messages(from, msg, state, origin) do
+    send_built_payload(from, msg, state, origin, :forward_messages, fn cid ->
+      Delivery.build_forward_messages(%{
+        conversation_id: cid,
+        from_chat_id: Map.get(msg, "from_chat_id"),
+        message_ids: Map.get(msg, "message_ids"),
+        disable_notification: Map.get(msg, "disable_notification"),
+        protect_content: Map.get(msg, "protect_content")
+      })
+    end)
+  end
+
+  defp delete_message(from, msg, state, origin) do
+    send_edit_payload(from, msg, state, origin, :delete_message, fn cid ->
+      Delivery.build_delete_message(%{
+        conversation_id: cid,
+        message_id: Map.get(msg, "message_id")
+      })
+    end)
+  end
+
+  defp delete_messages(from, msg, state, origin) do
+    send_edit_payload(from, msg, state, origin, :delete_messages, fn cid ->
+      Delivery.build_delete_messages(%{
+        conversation_id: cid,
+        message_ids: Map.get(msg, "message_ids")
+      })
+    end)
+  end
+
+  defp stop_poll(from, msg, state, origin) do
+    send_edit_payload(from, msg, state, origin, :stop_poll, fn cid ->
+      Delivery.build_stop_poll(%{
+        conversation_id: cid,
+        message_id: Map.get(msg, "message_id"),
+        reply_markup: inline_message_reply_markup(msg)
+      })
+    end)
+  end
+
+  defp send_rich_raw(from, msg, state, origin) do
+    with {:ok, cid} <-
+           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+         :ok <- RichMessage.validate(Map.get(msg, "rich_message", %{})),
+         {:ok, state} <-
+           send_rich_payload(cid, Map.get(msg, "rich_message"), msg, state, %{
+             origin: origin,
+             from: from,
+             mark: Map.get(msg, "mark")
+           }) do
+      {:ok, state}
+    else
+      {:error, %{path: _} = error} -> {:error, {:invalid_rich_message, error}, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp send_rich_payload(cid, rich_message, msg, state, meta) do
+    payload =
+      Delivery.build_send_rich_message(%{
+        conversation_id: cid,
+        rich_message: rich_message,
+        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
+        reply_markup: message_reply_markup(msg),
+        disable_notification: Map.get(msg, "disable_notification"),
+        protect_content: Map.get(msg, "protect_content"),
+        message_effect_id: Map.get(msg, "message_effect_id"),
+        allow_paid_broadcast: Map.get(msg, "allow_paid_broadcast")
+      })
+
+    state = clear_progress(cid, state) |> throttle()
+    result = dispatch_payload(payload, state, Map.get(msg, "fallback_text", ""))
+
+    state =
+      state
+      |> record_send(cid, payload, result)
+      |> record_logical_delivery(cid, %{rich_message: rich_message}, result, meta)
+
+    {:ok, state}
+  end
+
+  defp send_media(from, msg, state, origin) do
+    with {:ok, cid} <-
+           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+         {:cont, state} <- prepare_delivery(from, cid, origin, state),
+         {:ok, payload} <-
+           safe_build_payload(fn ->
+             Delivery.build_send_media(%{
+               conversation_id: cid,
+               media_type: Map.get(msg, "media_type"),
+               media: Map.get(msg, "media") || Map.get(msg, "url"),
+               caption: Map.get(msg, "caption") || Map.get(msg, "text"),
+               reply_to_message_id:
+                 validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
+               reply_markup: message_reply_markup(msg),
+               spoiler: Map.get(msg, "spoiler"),
+               disable_notification: Map.get(msg, "disable_notification"),
+               protect_content: Map.get(msg, "protect_content")
+             })
+           end) do
+      state = clear_progress(cid, state) |> throttle()
+
+      result =
+        dispatch_payload(payload, state, Map.get(msg, "caption") || Map.get(msg, "text", ""))
+
+      state =
+        state
+        |> record_send(cid, payload, result)
+        |> record_logical_delivery(
+          cid,
+          %{media: Map.get(msg, "media") || Map.get(msg, "url")},
+          result,
+          %{
+            origin: origin,
+            from: from,
+            mark: Map.get(msg, "mark")
+          }
+        )
+
+      {:ok, stamp_reply(state, cid, origin)}
+    else
+      {:suppress, state} -> {:ok, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp send_video_note(from, msg, state, origin) do
+    send_built_payload(from, msg, state, origin, :video_note, fn cid ->
+      Delivery.build_send_video_note(%{
+        conversation_id: cid,
+        video_note: Map.get(msg, "video_note") || Map.get(msg, "media"),
+        duration: Map.get(msg, "duration"),
+        length: Map.get(msg, "length"),
+        thumbnail: Map.get(msg, "thumbnail"),
+        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
+        reply_markup: message_reply_markup(msg),
+        disable_notification: Map.get(msg, "disable_notification"),
+        protect_content: Map.get(msg, "protect_content")
+      })
+    end)
+  end
+
+  defp send_live_photo(from, msg, state, origin) do
+    send_built_payload(from, msg, state, origin, :live_photo, fn cid ->
+      Delivery.build_send_live_photo(%{
+        conversation_id: cid,
+        live_photo: Map.get(msg, "live_photo"),
+        photo: Map.get(msg, "photo"),
+        caption: Map.get(msg, "caption") || Map.get(msg, "text"),
+        show_caption_above_media: Map.get(msg, "show_caption_above_media"),
+        spoiler: Map.get(msg, "spoiler"),
+        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
+        reply_markup: message_reply_markup(msg),
+        disable_notification: Map.get(msg, "disable_notification"),
+        protect_content: Map.get(msg, "protect_content")
+      })
+    end)
+  end
+
+  defp send_sticker(from, msg, state, origin) do
+    send_built_payload(from, msg, state, origin, :sticker, fn cid ->
+      Delivery.build_send_sticker(%{
+        conversation_id: cid,
+        sticker: Map.get(msg, "sticker") || Map.get(msg, "media"),
+        emoji: Map.get(msg, "emoji"),
+        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
+        reply_markup: message_reply_markup(msg),
+        disable_notification: Map.get(msg, "disable_notification"),
+        protect_content: Map.get(msg, "protect_content"),
+        allow_paid_broadcast: Map.get(msg, "allow_paid_broadcast"),
+        message_effect_id: Map.get(msg, "message_effect_id")
+      })
+    end)
+  end
+
+  defp send_media_group(from, msg, state, origin) do
+    send_built_payload(from, msg, state, origin, :media_group, fn cid ->
+      Delivery.build_send_media_group(%{
+        conversation_id: cid,
+        media: Map.get(msg, "media"),
+        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
+        disable_notification: Map.get(msg, "disable_notification"),
+        protect_content: Map.get(msg, "protect_content")
+      })
+    end)
+  end
+
+  defp send_paid_media(from, msg, state, origin) do
+    send_built_payload(from, msg, state, origin, :paid_media, fn cid ->
+      Delivery.build_send_paid_media(%{
+        conversation_id: cid,
+        business_connection_id: Map.get(msg, "business_connection_id"),
+        star_count: Map.get(msg, "star_count"),
+        media: Map.get(msg, "media"),
+        payload: Map.get(msg, "payload"),
+        caption: Map.get(msg, "caption") || Map.get(msg, "text"),
+        caption_entities: Map.get(msg, "caption_entities"),
+        show_caption_above_media: Map.get(msg, "show_caption_above_media"),
+        direct_messages_topic_id: Map.get(msg, "direct_messages_topic_id"),
+        suggested_post_parameters: Map.get(msg, "suggested_post_parameters"),
+        reply_markup: inline_message_reply_markup(msg),
+        disable_notification: Map.get(msg, "disable_notification"),
+        protect_content: Map.get(msg, "protect_content"),
+        allow_paid_broadcast: Map.get(msg, "allow_paid_broadcast")
+      })
+    end)
+  end
+
+  defp send_poll(from, msg, state, origin) do
+    with {:ok, cid} <-
+           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+         {:ok, payload} <-
+           safe_build_payload(fn ->
+             Delivery.build_send_poll(%{
+               conversation_id: cid,
+               question: Map.get(msg, "question"),
+               options: Map.get(msg, "options"),
+               reply_to_message_id:
+                 validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
+               reply_markup: message_reply_markup(msg),
+               is_anonymous: Map.get(msg, "is_anonymous"),
+               allows_multiple_answers: Map.get(msg, "allows_multiple_answers"),
+               allows_revoting: Map.get(msg, "allows_revoting"),
+               shuffle_options: Map.get(msg, "shuffle_options"),
+               allow_adding_options: Map.get(msg, "allow_adding_options"),
+               hide_results_until_closes: Map.get(msg, "hide_results_until_closes"),
+               members_only: Map.get(msg, "members_only"),
+               country_codes: Map.get(msg, "country_codes"),
+               poll_type: Map.get(msg, "poll_type"),
+               correct_option_id: Map.get(msg, "correct_option_id"),
+               correct_option_ids: Map.get(msg, "correct_option_ids"),
+               explanation: Map.get(msg, "explanation"),
+               explanation_media: Map.get(msg, "explanation_media"),
+               description: Map.get(msg, "description"),
+               media: Map.get(msg, "media")
+             })
+           end) do
+      state = throttle(state)
+      result = dispatch_payload(payload, state, Map.get(msg, "question", ""))
+
+      state =
+        state
+        |> record_send(cid, payload, result)
+        |> record_logical_delivery(cid, %{poll: Map.get(msg, "question")}, result, %{
+          origin: origin,
+          from: from,
+          mark: Map.get(msg, "mark")
+        })
+
+      {:ok, state}
+    else
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp send_checklist(from, msg, state, origin) do
+    send_built_payload(from, msg, state, origin, :checklist, fn cid ->
+      Delivery.build_send_checklist(%{
+        conversation_id: cid,
+        business_connection_id: Map.get(msg, "business_connection_id"),
+        checklist: Map.get(msg, "checklist"),
+        title: Map.get(msg, "title"),
+        tasks: Map.get(msg, "tasks"),
+        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
+        reply_markup: inline_message_reply_markup(msg),
+        disable_notification: Map.get(msg, "disable_notification"),
+        protect_content: Map.get(msg, "protect_content"),
+        message_effect_id: Map.get(msg, "message_effect_id")
+      })
+    end)
+  end
+
+  defp send_invoice(from, msg, state, origin) do
+    send_built_payload(from, msg, state, origin, :invoice, fn cid ->
+      Delivery.build_send_invoice(%{
+        conversation_id: cid,
+        title: Map.get(msg, "title"),
+        description: Map.get(msg, "description"),
+        payload: Map.get(msg, "payload"),
+        provider_token: Map.get(msg, "provider_token"),
+        currency: Map.get(msg, "currency"),
+        prices: Map.get(msg, "prices"),
+        max_tip_amount: Map.get(msg, "max_tip_amount"),
+        suggested_tip_amounts: Map.get(msg, "suggested_tip_amounts"),
+        start_parameter: Map.get(msg, "start_parameter"),
+        provider_data: Map.get(msg, "provider_data"),
+        photo_url: Map.get(msg, "photo_url"),
+        photo_size: Map.get(msg, "photo_size"),
+        photo_width: Map.get(msg, "photo_width"),
+        photo_height: Map.get(msg, "photo_height"),
+        need_name: Map.get(msg, "need_name"),
+        need_phone_number: Map.get(msg, "need_phone_number"),
+        need_email: Map.get(msg, "need_email"),
+        need_shipping_address: Map.get(msg, "need_shipping_address"),
+        send_phone_number_to_provider: Map.get(msg, "send_phone_number_to_provider"),
+        send_email_to_provider: Map.get(msg, "send_email_to_provider"),
+        is_flexible: Map.get(msg, "is_flexible"),
+        direct_messages_topic_id: Map.get(msg, "direct_messages_topic_id"),
+        suggested_post_parameters: Map.get(msg, "suggested_post_parameters"),
+        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
+        reply_markup: inline_message_reply_markup(msg),
+        disable_notification: Map.get(msg, "disable_notification"),
+        protect_content: Map.get(msg, "protect_content"),
+        allow_paid_broadcast: Map.get(msg, "allow_paid_broadcast"),
+        message_effect_id: Map.get(msg, "message_effect_id")
+      })
+    end)
+  end
+
+  defp send_game(from, msg, state, origin) do
+    send_built_payload(from, msg, state, origin, :game, fn cid ->
+      Delivery.build_send_game(%{
+        conversation_id: cid,
+        business_connection_id: Map.get(msg, "business_connection_id"),
+        game_short_name: Map.get(msg, "game_short_name"),
+        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
+        reply_markup: inline_message_reply_markup(msg),
+        disable_notification: Map.get(msg, "disable_notification"),
+        protect_content: Map.get(msg, "protect_content"),
+        allow_paid_broadcast: Map.get(msg, "allow_paid_broadcast"),
+        message_effect_id: Map.get(msg, "message_effect_id")
+      })
+    end)
+  end
+
+  defp send_location(from, msg, state, origin) do
+    attrs = %{
+      latitude: Map.get(msg, "latitude"),
+      longitude: Map.get(msg, "longitude"),
+      horizontal_accuracy: Map.get(msg, "horizontal_accuracy"),
+      live_period: Map.get(msg, "live_period"),
+      heading: Map.get(msg, "heading"),
+      proximity_alert_radius: Map.get(msg, "proximity_alert_radius")
+    }
+
+    send_place(from, msg, state, origin, :location, attrs)
+  end
+
+  defp send_venue(from, msg, state, origin) do
+    attrs = %{
+      latitude: Map.get(msg, "latitude"),
+      longitude: Map.get(msg, "longitude"),
+      title: Map.get(msg, "title"),
+      address: Map.get(msg, "address"),
+      foursquare_id: Map.get(msg, "foursquare_id"),
+      foursquare_type: Map.get(msg, "foursquare_type"),
+      google_place_id: Map.get(msg, "google_place_id"),
+      google_place_type: Map.get(msg, "google_place_type")
+    }
+
+    send_place(from, msg, state, origin, :venue, attrs)
+  end
+
+  defp send_contact(from, msg, state, origin) do
+    attrs = %{
+      phone_number: Map.get(msg, "phone_number"),
+      first_name: Map.get(msg, "first_name"),
+      last_name: Map.get(msg, "last_name"),
+      vcard: Map.get(msg, "vcard")
+    }
+
+    send_place(from, msg, state, origin, :contact, attrs)
+  end
+
+  defp send_dice(from, msg, state, origin) do
+    send_built_payload(from, msg, state, origin, :dice, fn cid ->
+      Delivery.build_send_dice(%{
+        conversation_id: cid,
+        emoji: Map.get(msg, "emoji"),
+        reply_to_message_id: validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
+        reply_markup: message_reply_markup(msg),
+        disable_notification: Map.get(msg, "disable_notification"),
+        protect_content: Map.get(msg, "protect_content")
+      })
+    end)
+  end
+
+  defp send_chat_action(from, msg, state, origin) do
+    with {:ok, cid} <-
+           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+         {:ok, payload} <-
+           safe_build_payload(fn ->
+             Delivery.build_send_chat_action(%{
+               conversation_id: cid,
+               action:
+                 Map.get(msg, "chat_action") || Map.get(msg, "typing_action") ||
+                   Map.get(msg, "action_type") || "typing",
+               business_connection_id: Map.get(msg, "business_connection_id")
+             })
+           end) do
+      state = throttle(state)
+      result = dispatch_payload(payload, state, nil)
+
+      state =
+        state
+        |> record_send(cid, payload, result)
+        |> record_logical_delivery(cid, %{chat_action: payload.action}, result, %{
+          origin: origin,
+          from: from,
+          mark: Map.get(msg, "mark")
+        })
+
+      {:ok, state}
+    else
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp set_reaction(from, msg, state, origin) do
+    with {:ok, cid} <-
+           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+         {:ok, payload} <-
+           safe_build_payload(fn ->
+             Delivery.build_set_message_reaction(%{
+               conversation_id: cid,
+               message_id: Map.get(msg, "message_id"),
+               reaction: Map.get(msg, "reaction") || Map.get(msg, "reactions"),
+               is_big: Map.get(msg, "is_big")
+             })
+           end) do
+      state = throttle(state)
+      result = dispatch_payload(payload, state, nil)
+
+      state =
+        state
+        |> record_send(cid, payload, result)
+        |> record_logical_delivery(cid, %{reaction: Map.get(payload, :reaction, [])}, result, %{
+          origin: origin,
+          from: from,
+          mark: Map.get(msg, "mark")
+        })
+
+      {:ok, state}
+    else
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp send_built_payload(from, msg, state, origin, logical_kind, builder) do
+    with {:ok, cid} <-
+           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+         {:cont, state} <- prepare_delivery(from, cid, origin, state),
+         {:ok, payload} <- safe_build_payload(fn -> builder.(cid) end) do
+      state = clear_progress(cid, state) |> throttle()
+      result = dispatch_payload(payload, state, Map.get(msg, "caption") || Map.get(msg, "text"))
+
+      state =
+        state
+        |> record_send(cid, payload, result)
+        |> record_logical_delivery(cid, %{logical_kind => payload}, result, %{
+          origin: origin,
+          from: from,
+          mark: Map.get(msg, "mark")
+        })
+
+      {:ok, stamp_reply(state, cid, origin)}
+    else
+      {:suppress, state} -> {:ok, state}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp send_edit_payload(from, msg, state, origin, logical_kind, builder) do
+    with {:ok, cid} <-
+           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+         {:ok, payload} <- safe_build_payload(fn -> builder.(cid) end) do
+      state = throttle(state)
+      result = dispatch_payload(payload, state, Map.get(msg, "text") || Map.get(msg, "caption"))
+
+      state =
+        state
+        |> record_send(cid, payload, result)
+        |> record_logical_delivery(cid, %{logical_kind => payload}, result, %{
+          origin: origin,
+          from: from,
+          mark: Map.get(msg, "mark")
+        })
+
+      {:ok, state}
+    else
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp send_query_payload(from, msg, state, logical_kind, builder) do
+    with {:ok, payload} <- safe_build_payload(builder) do
+      state = throttle(state)
+      result = dispatch_payload(payload, state, nil)
+
+      state =
+        state
+        |> record_send(Map.get(msg, "conversation_id") || "telegram:query", payload, result)
+        |> record_logical_delivery(
+          Map.get(msg, "conversation_id") || "telegram:query",
+          %{logical_kind => payload},
+          result,
+          %{
+            origin: :query,
+            from: from,
+            mark: Map.get(msg, "mark")
+          }
+        )
+
+      {:ok, state}
+    else
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp gift_query_attrs(msg) do
+    [
+      :business_connection_id,
+      :user_id,
+      :chat_id,
+      :exclude_unsaved,
+      :exclude_saved,
+      :exclude_unlimited,
+      :exclude_limited_upgradable,
+      :exclude_limited_non_upgradable,
+      :exclude_from_blockchain,
+      :exclude_unique,
+      :sort_by_price,
+      :offset,
+      :limit
+    ]
+    |> Enum.reduce(%{}, fn key, acc ->
+      case Map.get(msg, to_string(key)) do
+        nil -> acc
+        value -> Map.put(acc, key, value)
+      end
+    end)
+  end
+
+  defp game_score_attrs(msg) do
+    [
+      :user_id,
+      :score,
+      :force,
+      :disable_edit_message,
+      :chat_id,
+      :message_id,
+      :inline_message_id
+    ]
+    |> Enum.reduce(%{}, fn key, acc ->
+      case Map.get(msg, to_string(key)) do
+        nil -> acc
+        value -> Map.put(acc, key, value)
+      end
+    end)
+  end
+
+  defp bot_profile_attrs(msg) do
+    [
+      :commands,
+      :scope,
+      :language_code,
+      :name,
+      :description,
+      :short_description,
+      :chat_id,
+      :menu_button,
+      :rights,
+      :for_channels
+    ]
+    |> Enum.reduce(%{}, fn key, acc ->
+      case Map.get(msg, to_string(key)) do
+        nil -> acc
+        value -> Map.put(acc, key, value)
+      end
+    end)
+  end
+
+  defp build_utility_payload("get_user_profile_photos", msg),
+    do: Delivery.build_get_user_profile_photos(utility_attrs(msg))
+
+  defp build_utility_payload("get_user_profile_audios", msg),
+    do: Delivery.build_get_user_profile_audios(utility_attrs(msg))
+
+  defp build_utility_payload("set_user_emoji_status", msg),
+    do: Delivery.build_set_user_emoji_status(utility_attrs(msg))
+
+  defp build_utility_payload("get_file", msg), do: Delivery.build_get_file(utility_attrs(msg))
+
+  defp utility_attrs(msg) do
+    [
+      :user_id,
+      :offset,
+      :limit,
+      :emoji_status_custom_emoji_id,
+      :emoji_status_expiration_date,
+      :file_id
+    ]
+    |> Enum.reduce(%{}, fn key, acc ->
+      case Map.get(msg, to_string(key)) do
+        nil -> acc
+        value -> Map.put(acc, key, value)
+      end
+    end)
+  end
+
+  defp build_chat_admin_payload("delete_message_reaction", msg),
+    do: Delivery.build_delete_message_reaction(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("delete_all_message_reactions", msg),
+    do: Delivery.build_delete_all_message_reactions(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("ban_chat_member", msg),
+    do: Delivery.build_ban_chat_member(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("unban_chat_member", msg),
+    do: Delivery.build_unban_chat_member(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("restrict_chat_member", msg),
+    do: Delivery.build_restrict_chat_member(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("promote_chat_member", msg),
+    do: Delivery.build_promote_chat_member(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("set_chat_administrator_custom_title", msg),
+    do: Delivery.build_set_chat_administrator_custom_title(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("set_chat_member_tag", msg),
+    do: Delivery.build_set_chat_member_tag(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("ban_chat_sender_chat", msg),
+    do: Delivery.build_ban_chat_sender_chat(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("unban_chat_sender_chat", msg),
+    do: Delivery.build_unban_chat_sender_chat(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("set_chat_permissions", msg),
+    do: Delivery.build_set_chat_permissions(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("export_chat_invite_link", msg),
+    do: Delivery.build_export_chat_invite_link(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("create_chat_invite_link", msg),
+    do: Delivery.build_create_chat_invite_link(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("edit_chat_invite_link", msg),
+    do: Delivery.build_edit_chat_invite_link(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("create_chat_subscription_invite_link", msg),
+    do: Delivery.build_create_chat_subscription_invite_link(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("edit_chat_subscription_invite_link", msg),
+    do: Delivery.build_edit_chat_subscription_invite_link(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("revoke_chat_invite_link", msg),
+    do: Delivery.build_revoke_chat_invite_link(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("approve_chat_join_request", msg),
+    do: Delivery.build_approve_chat_join_request(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("decline_chat_join_request", msg),
+    do: Delivery.build_decline_chat_join_request(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("answer_chat_join_request_query", msg),
+    do: Delivery.build_answer_chat_join_request_query(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("send_chat_join_request_web_app", msg),
+    do: Delivery.build_send_chat_join_request_web_app(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("set_chat_photo", msg),
+    do: Delivery.build_set_chat_photo(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("delete_chat_photo", msg),
+    do: Delivery.build_delete_chat_photo(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("set_chat_title", msg),
+    do: Delivery.build_set_chat_title(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("set_chat_description", msg),
+    do: Delivery.build_set_chat_description(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("pin_chat_message", msg),
+    do: Delivery.build_pin_chat_message(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("unpin_chat_message", msg),
+    do: Delivery.build_unpin_chat_message(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("unpin_all_chat_messages", msg),
+    do: Delivery.build_unpin_all_chat_messages(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("leave_chat", msg),
+    do: Delivery.build_leave_chat(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("get_chat", msg),
+    do: Delivery.build_get_chat(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("get_chat_administrators", msg),
+    do: Delivery.build_get_chat_administrators(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("get_chat_member_count", msg),
+    do: Delivery.build_get_chat_member_count(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("get_chat_member", msg),
+    do: Delivery.build_get_chat_member(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("set_chat_sticker_set", msg),
+    do: Delivery.build_set_chat_sticker_set(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("delete_chat_sticker_set", msg),
+    do: Delivery.build_delete_chat_sticker_set(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("get_forum_topic_icon_stickers", msg),
+    do: Delivery.build_get_forum_topic_icon_stickers(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("create_forum_topic", msg),
+    do: Delivery.build_create_forum_topic(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("edit_forum_topic", msg),
+    do: Delivery.build_edit_forum_topic(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("close_forum_topic", msg),
+    do: Delivery.build_close_forum_topic(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("reopen_forum_topic", msg),
+    do: Delivery.build_reopen_forum_topic(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("delete_forum_topic", msg),
+    do: Delivery.build_delete_forum_topic(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("unpin_all_forum_topic_messages", msg),
+    do: Delivery.build_unpin_all_forum_topic_messages(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("edit_general_forum_topic", msg),
+    do: Delivery.build_edit_general_forum_topic(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("close_general_forum_topic", msg),
+    do: Delivery.build_close_general_forum_topic(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("reopen_general_forum_topic", msg),
+    do: Delivery.build_reopen_general_forum_topic(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("hide_general_forum_topic", msg),
+    do: Delivery.build_hide_general_forum_topic(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("unhide_general_forum_topic", msg),
+    do: Delivery.build_unhide_general_forum_topic(chat_admin_attrs(msg))
+
+  defp build_chat_admin_payload("unpin_all_general_forum_topic_messages", msg),
+    do: Delivery.build_unpin_all_general_forum_topic_messages(chat_admin_attrs(msg))
+
+  defp chat_admin_attrs(msg) do
+    [
+      :chat_id,
+      :message_id,
+      :message_thread_id,
+      :user_id,
+      :actor_chat_id,
+      :sender_chat_id,
+      :permissions,
+      :until_date,
+      :revoke_messages,
+      :only_if_banned,
+      :use_independent_chat_permissions,
+      :is_anonymous,
+      :can_manage_chat,
+      :can_delete_messages,
+      :can_manage_video_chats,
+      :can_restrict_members,
+      :can_promote_members,
+      :can_change_info,
+      :can_invite_users,
+      :can_post_stories,
+      :can_edit_stories,
+      :can_delete_stories,
+      :can_post_messages,
+      :can_edit_messages,
+      :can_pin_messages,
+      :can_manage_topics,
+      :can_manage_direct_messages,
+      :custom_title,
+      :tag,
+      :name,
+      :expire_date,
+      :member_limit,
+      :creates_join_request,
+      :invite_link,
+      :subscription_period,
+      :subscription_price,
+      :chat_join_request_query_id,
+      :query_id,
+      :result,
+      :web_app_url,
+      :photo,
+      :title,
+      :description,
+      :disable_notification,
+      :business_connection_id,
+      :return_bots,
+      :sticker_set_name,
+      :icon_color,
+      :icon_custom_emoji_id
+    ]
+    |> Enum.reduce(%{}, fn key, acc ->
+      case Map.get(msg, to_string(key)) do
+        nil -> acc
+        value -> Map.put(acc, key, value)
+      end
+    end)
+    |> normalize_chat_join_query_alias()
+  end
+
+  defp normalize_chat_join_query_alias(%{query_id: query_id} = attrs) do
+    attrs
+    |> Map.put_new(:chat_join_request_query_id, query_id)
+    |> Map.delete(:query_id)
+  end
+
+  defp normalize_chat_join_query_alias(attrs), do: attrs
+
+  defp build_sticker_payload("get_sticker_set", msg),
+    do: Delivery.build_get_sticker_set(sticker_attrs(msg))
+
+  defp build_sticker_payload("get_custom_emoji_stickers", msg),
+    do: Delivery.build_get_custom_emoji_stickers(sticker_attrs(msg))
+
+  defp build_sticker_payload("upload_sticker_file", msg),
+    do: Delivery.build_upload_sticker_file(sticker_attrs(msg))
+
+  defp build_sticker_payload("create_new_sticker_set", msg),
+    do: Delivery.build_create_new_sticker_set(sticker_attrs(msg))
+
+  defp build_sticker_payload("add_sticker_to_set", msg),
+    do: Delivery.build_add_sticker_to_set(sticker_attrs(msg))
+
+  defp build_sticker_payload("set_sticker_position_in_set", msg),
+    do: Delivery.build_set_sticker_position_in_set(sticker_attrs(msg))
+
+  defp build_sticker_payload("delete_sticker_from_set", msg),
+    do: Delivery.build_delete_sticker_from_set(sticker_attrs(msg))
+
+  defp build_sticker_payload("replace_sticker_in_set", msg),
+    do: Delivery.build_replace_sticker_in_set(sticker_attrs(msg))
+
+  defp build_sticker_payload("set_sticker_emoji_list", msg),
+    do: Delivery.build_set_sticker_emoji_list(sticker_attrs(msg))
+
+  defp build_sticker_payload("set_sticker_keywords", msg),
+    do: Delivery.build_set_sticker_keywords(sticker_attrs(msg))
+
+  defp build_sticker_payload("set_sticker_mask_position", msg),
+    do: Delivery.build_set_sticker_mask_position(sticker_attrs(msg))
+
+  defp build_sticker_payload("set_sticker_set_title", msg),
+    do: Delivery.build_set_sticker_set_title(sticker_attrs(msg))
+
+  defp build_sticker_payload("set_sticker_set_thumbnail", msg),
+    do: Delivery.build_set_sticker_set_thumbnail(sticker_attrs(msg))
+
+  defp build_sticker_payload("set_custom_emoji_sticker_set_thumbnail", msg),
+    do: Delivery.build_set_custom_emoji_sticker_set_thumbnail(sticker_attrs(msg))
+
+  defp build_sticker_payload("delete_sticker_set", msg),
+    do: Delivery.build_delete_sticker_set(sticker_attrs(msg))
+
+  defp sticker_attrs(msg) do
+    [
+      :user_id,
+      :name,
+      :title,
+      :sticker,
+      :stickers,
+      :sticker_format,
+      :format,
+      :sticker_type,
+      :needs_repainting,
+      :custom_emoji_ids,
+      :position,
+      :old_sticker,
+      :emoji_list,
+      :keywords,
+      :mask_position,
+      :thumbnail,
+      :custom_emoji_id
+    ]
+    |> Enum.reduce(%{}, fn key, acc ->
+      case Map.get(msg, to_string(key)) do
+        nil -> acc
+        value -> Map.put(acc, key, value)
+      end
+    end)
+  end
+
+  defp send_place(from, msg, state, origin, kind, attrs) do
+    with {:ok, cid} <-
+           resolve_target(from, Map.get(msg, "conversation_id"), state, state.send_sources),
+         {:cont, state} <- prepare_delivery(from, cid, origin, state) do
+      base =
+        attrs
+        |> Map.merge(%{
+          conversation_id: cid,
+          reply_to_message_id:
+            validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state),
+          reply_markup: message_reply_markup(msg),
+          disable_notification: Map.get(msg, "disable_notification"),
+          protect_content: Map.get(msg, "protect_content")
+        })
+
+      case safe_build_payload(fn ->
+             case kind do
+               :location -> Delivery.build_send_location(base)
+               :venue -> Delivery.build_send_venue(base)
+               :contact -> Delivery.build_send_contact(base)
+             end
+           end) do
+        {:ok, payload} ->
+          state = clear_progress(cid, state) |> throttle()
+          result = dispatch_payload(payload, state, nil)
+
+          state =
+            state
+            |> record_send(cid, payload, result)
+            |> record_logical_delivery(cid, %{kind => attrs}, result, %{
+              origin: origin,
+              from: from,
+              mark: Map.get(msg, "mark")
+            })
+
+          {:ok, stamp_reply(state, cid, origin)}
+
+        {:error, reason} ->
+          {:error, reason, state}
+      end
+    else
+      {:suppress, state} -> {:ok, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
@@ -495,27 +2457,485 @@ defmodule Genswarms.Telegram.Objects.Sender do
   end
 
   defp do_dispatch_payload(payload, state, fallback_text) do
+    method = Map.get(payload, :_method, :send_message)
+    telegram_payload = Map.delete(payload, :_method)
+
     cond do
       state.dry_run ->
         {:ok, %{"message_id" => System.unique_integer([:positive]), "dry_run" => true}}
 
-      Map.has_key?(payload, :photo) ->
-        case Client.send_photo(state.client, payload, client_opts(state)) do
+      method == :send_photo ->
+        case Client.send_photo(state.client, telegram_payload, client_opts(state)) do
           {:ok, _} = ok ->
             ok
 
           {:error, _reason} ->
-            payload
+            telegram_payload
             |> Map.delete(:photo)
             |> Map.delete(:caption)
             |> Map.put(:text, Map.get(payload, :caption, ""))
             |> send_message_with_fallback(state, fallback_text)
         end
 
+      method in [
+        :answer_callback_query,
+        :answer_web_app_query,
+        :answer_inline_query,
+        :answer_guest_query,
+        :save_prepared_inline_message,
+        :save_prepared_keyboard_button,
+        :get_user_chat_boosts,
+        :get_business_connection,
+        :get_managed_bot_token,
+        :replace_managed_bot_token,
+        :get_managed_bot_access_settings,
+        :set_managed_bot_access_settings,
+        :get_user_personal_chat_messages,
+        :set_my_commands,
+        :delete_my_commands,
+        :get_my_commands,
+        :set_my_name,
+        :get_my_name,
+        :set_my_description,
+        :get_my_description,
+        :set_my_short_description,
+        :get_my_short_description,
+        :set_my_profile_photo,
+        :remove_my_profile_photo,
+        :set_chat_menu_button,
+        :get_chat_menu_button,
+        :set_my_default_administrator_rights,
+        :get_my_default_administrator_rights,
+        :create_invoice_link,
+        :answer_shipping_query,
+        :answer_pre_checkout_query,
+        :get_my_star_balance,
+        :get_star_transactions,
+        :get_available_gifts,
+        :send_gift,
+        :gift_premium_subscription,
+        :get_business_account_star_balance,
+        :transfer_business_account_stars,
+        :get_business_account_gifts,
+        :get_user_gifts,
+        :get_chat_gifts,
+        :convert_gift_to_stars,
+        :upgrade_gift,
+        :transfer_gift,
+        :verify_user,
+        :verify_chat,
+        :remove_user_verification,
+        :remove_chat_verification,
+        :read_business_message,
+        :delete_business_messages,
+        :set_business_account_name,
+        :set_business_account_username,
+        :set_business_account_bio,
+        :set_business_account_profile_photo,
+        :remove_business_account_profile_photo,
+        :set_business_account_gift_settings,
+        :approve_suggested_post,
+        :decline_suggested_post,
+        :set_passport_data_errors,
+        :set_game_score,
+        :get_game_high_scores,
+        :refund_star_payment,
+        :edit_user_star_subscription,
+        :post_story,
+        :repost_story,
+        :edit_story,
+        :delete_story,
+        :send_message_draft,
+        :send_video,
+        :send_animation,
+        :send_audio,
+        :send_voice,
+        :send_video_note,
+        :send_document,
+        :send_sticker,
+        :send_live_photo,
+        :send_media_group,
+        :send_paid_media,
+        :send_poll,
+        :send_checklist,
+        :send_invoice,
+        :send_game,
+        :send_location,
+        :send_venue,
+        :send_contact,
+        :send_dice,
+        :send_chat_action,
+        :set_message_reaction,
+        :forward_message,
+        :forward_messages,
+        :copy_message,
+        :copy_messages,
+        :delete_message,
+        :delete_messages,
+        :delete_message_reaction,
+        :delete_all_message_reactions,
+        :send_rich_message,
+        :send_rich_message_draft,
+        :edit_message_caption,
+        :edit_message_media,
+        :edit_message_live_location,
+        :edit_message_checklist,
+        :stop_message_live_location,
+        :edit_message_reply_markup,
+        :stop_poll,
+        :edit_message_text
+      ] or method in @utility_methods or method in @chat_admin_methods or
+          method in @sticker_methods ->
+        dispatch_client_method(method, telegram_payload, state, fallback_text)
+
       true ->
-        send_message_with_fallback(payload, state, fallback_text)
+        send_message_with_fallback(telegram_payload, state, fallback_text)
     end
   end
+
+  defp dispatch_client_method(:send_video, payload, state, _fallback),
+    do: Client.send_video(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:answer_callback_query, payload, state, _fallback),
+    do: Client.answer_callback_query(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:answer_web_app_query, payload, state, _fallback),
+    do: Client.answer_web_app_query(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:answer_inline_query, payload, state, _fallback),
+    do: Client.answer_inline_query(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:answer_guest_query, payload, state, _fallback),
+    do: Client.answer_guest_query(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:save_prepared_inline_message, payload, state, _fallback),
+    do: Client.save_prepared_inline_message(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:save_prepared_keyboard_button, payload, state, _fallback),
+    do: Client.save_prepared_keyboard_button(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_user_chat_boosts, payload, state, _fallback),
+    do: Client.get_user_chat_boosts(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_business_connection, payload, state, _fallback),
+    do: Client.get_business_connection(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_managed_bot_token, payload, state, _fallback),
+    do: Client.get_managed_bot_token(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:replace_managed_bot_token, payload, state, _fallback),
+    do: Client.replace_managed_bot_token(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_managed_bot_access_settings, payload, state, _fallback),
+    do: Client.get_managed_bot_access_settings(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_managed_bot_access_settings, payload, state, _fallback),
+    do: Client.set_managed_bot_access_settings(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_user_personal_chat_messages, payload, state, _fallback),
+    do: Client.get_user_personal_chat_messages(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_my_commands, payload, state, _fallback),
+    do: Client.set_my_commands(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:delete_my_commands, payload, state, _fallback),
+    do: Client.delete_my_commands(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_my_commands, payload, state, _fallback),
+    do: Client.get_my_commands(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_my_name, payload, state, _fallback),
+    do: Client.set_my_name(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_my_name, payload, state, _fallback),
+    do: Client.get_my_name(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_my_description, payload, state, _fallback),
+    do: Client.set_my_description(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_my_description, payload, state, _fallback),
+    do: Client.get_my_description(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_my_short_description, payload, state, _fallback),
+    do: Client.set_my_short_description(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_my_short_description, payload, state, _fallback),
+    do: Client.get_my_short_description(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_my_profile_photo, payload, state, _fallback),
+    do: Client.set_my_profile_photo(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:remove_my_profile_photo, _payload, state, _fallback),
+    do: Client.remove_my_profile_photo(state.client, %{}, client_opts(state))
+
+  defp dispatch_client_method(:set_chat_menu_button, payload, state, _fallback),
+    do: Client.set_chat_menu_button(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_chat_menu_button, payload, state, _fallback),
+    do: Client.get_chat_menu_button(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_my_default_administrator_rights, payload, state, _fallback),
+    do: Client.set_my_default_administrator_rights(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_my_default_administrator_rights, payload, state, _fallback),
+    do: Client.get_my_default_administrator_rights(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:create_invoice_link, payload, state, _fallback),
+    do: Client.create_invoice_link(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:answer_shipping_query, payload, state, _fallback),
+    do: Client.answer_shipping_query(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:answer_pre_checkout_query, payload, state, _fallback),
+    do: Client.answer_pre_checkout_query(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_my_star_balance, _payload, state, _fallback),
+    do: Client.get_my_star_balance(state.client, client_opts(state))
+
+  defp dispatch_client_method(:get_star_transactions, payload, state, _fallback),
+    do: Client.get_star_transactions(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_available_gifts, _payload, state, _fallback),
+    do: Client.get_available_gifts(state.client, client_opts(state))
+
+  defp dispatch_client_method(:send_gift, payload, state, _fallback),
+    do: Client.send_gift(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:gift_premium_subscription, payload, state, _fallback),
+    do: Client.gift_premium_subscription(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_business_account_star_balance, payload, state, _fallback),
+    do: Client.get_business_account_star_balance(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:transfer_business_account_stars, payload, state, _fallback),
+    do: Client.transfer_business_account_stars(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_business_account_gifts, payload, state, _fallback),
+    do: Client.get_business_account_gifts(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_user_gifts, payload, state, _fallback),
+    do: Client.get_user_gifts(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_chat_gifts, payload, state, _fallback),
+    do: Client.get_chat_gifts(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:convert_gift_to_stars, payload, state, _fallback),
+    do: Client.convert_gift_to_stars(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:upgrade_gift, payload, state, _fallback),
+    do: Client.upgrade_gift(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:transfer_gift, payload, state, _fallback),
+    do: Client.transfer_gift(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:verify_user, payload, state, _fallback),
+    do: Client.verify_user(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:verify_chat, payload, state, _fallback),
+    do: Client.verify_chat(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:remove_user_verification, payload, state, _fallback),
+    do: Client.remove_user_verification(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:remove_chat_verification, payload, state, _fallback),
+    do: Client.remove_chat_verification(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:read_business_message, payload, state, _fallback),
+    do: Client.read_business_message(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:delete_business_messages, payload, state, _fallback),
+    do: Client.delete_business_messages(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_business_account_name, payload, state, _fallback),
+    do: Client.set_business_account_name(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_business_account_username, payload, state, _fallback),
+    do: Client.set_business_account_username(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_business_account_bio, payload, state, _fallback),
+    do: Client.set_business_account_bio(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_business_account_profile_photo, payload, state, _fallback),
+    do: Client.set_business_account_profile_photo(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:remove_business_account_profile_photo, payload, state, _fallback),
+    do: Client.remove_business_account_profile_photo(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_business_account_gift_settings, payload, state, _fallback),
+    do: Client.set_business_account_gift_settings(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:approve_suggested_post, payload, state, _fallback),
+    do: Client.approve_suggested_post(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:decline_suggested_post, payload, state, _fallback),
+    do: Client.decline_suggested_post(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_passport_data_errors, payload, state, _fallback),
+    do: Client.set_passport_data_errors(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_game_score, payload, state, _fallback),
+    do: Client.set_game_score(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:get_game_high_scores, payload, state, _fallback),
+    do: Client.get_game_high_scores(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:refund_star_payment, payload, state, _fallback),
+    do: Client.refund_star_payment(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:edit_user_star_subscription, payload, state, _fallback),
+    do: Client.edit_user_star_subscription(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:post_story, payload, state, _fallback),
+    do: Client.post_story(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:repost_story, payload, state, _fallback),
+    do: Client.repost_story(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:edit_story, payload, state, _fallback),
+    do: Client.edit_story(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:delete_story, payload, state, _fallback),
+    do: Client.delete_story(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_message_draft, payload, state, _fallback),
+    do: Client.send_message_draft(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_animation, payload, state, _fallback),
+    do: Client.send_animation(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_audio, payload, state, _fallback),
+    do: Client.send_audio(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_voice, payload, state, _fallback),
+    do: Client.send_voice(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_video_note, payload, state, _fallback),
+    do: Client.send_video_note(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_document, payload, state, _fallback),
+    do: Client.send_document(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_sticker, payload, state, _fallback),
+    do: Client.send_sticker(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_live_photo, payload, state, _fallback),
+    do: Client.send_live_photo(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_media_group, payload, state, _fallback),
+    do: Client.send_media_group(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_paid_media, payload, state, _fallback),
+    do: Client.send_paid_media(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_poll, payload, state, _fallback),
+    do: Client.send_poll(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_checklist, payload, state, _fallback),
+    do: Client.send_checklist(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_invoice, payload, state, _fallback),
+    do: Client.send_invoice(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_game, payload, state, _fallback),
+    do: Client.send_game(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_location, payload, state, _fallback),
+    do: Client.send_location(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_venue, payload, state, _fallback),
+    do: Client.send_venue(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_contact, payload, state, _fallback),
+    do: Client.send_contact(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_dice, payload, state, _fallback),
+    do: Client.send_dice(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:send_chat_action, payload, state, _fallback),
+    do: Client.send_chat_action(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:set_message_reaction, payload, state, _fallback),
+    do: Client.set_message_reaction(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:forward_message, payload, state, _fallback),
+    do: Client.forward_message(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:forward_messages, payload, state, _fallback),
+    do: Client.forward_messages(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:copy_message, payload, state, _fallback),
+    do: Client.copy_message(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:copy_messages, payload, state, _fallback),
+    do: Client.copy_messages(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:delete_message, payload, state, _fallback),
+    do: Client.delete_message(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:delete_messages, payload, state, _fallback),
+    do: Client.delete_messages(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:logout, _payload, state, _fallback),
+    do: Client.logout(state.client, client_opts(state))
+
+  defp dispatch_client_method(:close, _payload, state, _fallback),
+    do: Client.close(state.client, client_opts(state))
+
+  defp dispatch_client_method(method, payload, state, _fallback)
+       when method in @utility_methods do
+    apply(Client, method, [state.client, payload, client_opts(state)])
+  end
+
+  defp dispatch_client_method(:get_forum_topic_icon_stickers, _payload, state, _fallback),
+    do: Client.get_forum_topic_icon_stickers(state.client, client_opts(state))
+
+  defp dispatch_client_method(method, payload, state, _fallback)
+       when method in @chat_admin_methods do
+    apply(Client, method, [state.client, payload, client_opts(state)])
+  end
+
+  defp dispatch_client_method(method, payload, state, _fallback)
+       when method in @sticker_methods do
+    apply(Client, method, [state.client, payload, client_opts(state)])
+  end
+
+  defp dispatch_client_method(:send_rich_message, payload, state, fallback_text) do
+    case Client.send_rich_message(state.client, payload, client_opts(state)) do
+      {:error, {:parse_error, _}} -> rich_plain_fallback(payload, state, fallback_text)
+      other -> other
+    end
+  end
+
+  defp dispatch_client_method(:send_rich_message_draft, payload, state, _fallback),
+    do: Client.send_rich_message_draft(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:edit_message_text, payload, state, fallback_text) do
+    case Client.edit_message_text(state.client, payload, client_opts(state)) do
+      {:error, {:parse_error, _}} -> rich_edit_plain_fallback(payload, state, fallback_text)
+      other -> other
+    end
+  end
+
+  defp dispatch_client_method(:edit_message_caption, payload, state, _fallback),
+    do: Client.edit_message_caption(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:edit_message_media, payload, state, _fallback),
+    do: Client.edit_message_media(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:edit_message_live_location, payload, state, _fallback),
+    do: Client.edit_message_live_location(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:edit_message_checklist, payload, state, _fallback),
+    do: Client.edit_message_checklist(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:stop_message_live_location, payload, state, _fallback),
+    do: Client.stop_message_live_location(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:edit_message_reply_markup, payload, state, _fallback),
+    do: Client.edit_message_reply_markup(state.client, payload, client_opts(state))
+
+  defp dispatch_client_method(:stop_poll, payload, state, _fallback),
+    do: Client.stop_poll(state.client, payload, client_opts(state))
 
   defp send_message_with_fallback(payload, state, fallback_text) do
     case Client.send_message(state.client, payload, client_opts(state)) do
@@ -548,6 +2968,38 @@ defmodule Genswarms.Telegram.Objects.Sender do
     |> Map.put(:text, plain_text)
     |> Map.delete(:parse_mode)
     |> then(&Client.send_message(state.client, &1, client_opts(state)))
+  end
+
+  defp rich_plain_fallback(payload, state, fallback_text) do
+    text = String.trim(to_string(fallback_text))
+
+    if text == "" do
+      {:error, {:parse_error, "rich message parse failed and no fallback_text was provided"}}
+    else
+      payload
+      |> Map.delete(:rich_message)
+      |> Map.put(:text, Genswarms.Telegram.Format.plain(text))
+      |> then(&Client.send_message(state.client, &1, client_opts(state)))
+    end
+  end
+
+  defp rich_edit_plain_fallback(payload, state, fallback_text) do
+    text = String.trim(to_string(fallback_text))
+
+    if text == "" do
+      {:error, {:parse_error, "rich edit parse failed and no fallback_text was provided"}}
+    else
+      payload
+      |> Map.delete(:rich_message)
+      |> Map.put(:text, Genswarms.Telegram.Format.plain(text))
+      |> then(&Client.edit_message_text(state.client, &1, client_opts(state)))
+    end
+  end
+
+  defp safe_build_payload(fun) do
+    {:ok, fun.()}
+  rescue
+    error in ArgumentError -> {:error, {:invalid_payload, Exception.message(error)}}
   end
 
   defp record_send(state, cid, payload, result) do
@@ -890,6 +3342,30 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp clear_progress(cid, state), do: %{state | progress: Map.delete(state.progress, cid)}
 
+  defp card_buttons(%{"card" => card} = msg) when is_map(card) do
+    Map.get(msg, "buttons") || Map.get(card, "buttons") || Map.get(card, :buttons)
+  end
+
+  defp card_buttons(msg), do: Map.get(msg, "buttons")
+
+  defp message_reply_markup(msg) do
+    Buttons.normalize_reply_markup(Map.get(msg, "reply_markup")) ||
+      Buttons.normalize(Map.get(msg, "buttons"))
+  end
+
+  defp inline_message_reply_markup(msg) do
+    case Buttons.normalize(Map.get(msg, "buttons")) do
+      nil ->
+        case Buttons.normalize_reply_markup(Map.get(msg, "reply_markup")) do
+          %{inline_keyboard: _rows} = markup -> markup
+          _ -> nil
+        end
+
+      buttons ->
+        buttons
+    end
+  end
+
   defp message_id_from_result({:ok, %{"message_id" => id}}) when is_integer(id), do: {:ok, id}
   defp message_id_from_result({:ok, %{message_id: id}}) when is_integer(id), do: {:ok, id}
   defp message_id_from_result(_), do: :error
@@ -898,4 +3374,6 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp decode(message) when is_binary(message), do: Jason.decode(message)
   defp decode(message) when is_map(message), do: {:ok, message}
+
+  defp truthy?(value), do: value in [true, "true", 1, "1"]
 end

@@ -157,6 +157,7 @@ defmodule Genswarms.Telegram.ObjectsTest do
     [_typing, photo_send] = Fake.calls(fake)
 
     assert photo_send.method == :send_photo
+
     assert photo_send.payload.reply_parameters == %{
              message_id: 55,
              allow_sending_without_reply: true
@@ -295,6 +296,9 @@ defmodule Genswarms.Telegram.ObjectsTest do
           "buttons" => [
             [%{"text" => "Open", "url" => "https://example.com"}],
             [%{"text" => "Mode", "action" => "mode quiet"}],
+            [%{"text" => "App", "web_app" => "https://example.com/app"}],
+            [%{"text" => "Inline", "switch_inline_query_current_chat" => "query"}],
+            [%{"text" => "Copy", "copy_text" => "copy me"}],
             [%{"text" => "Bad", "url" => "javascript:alert"}],
             [%{"text" => "Long", "action" => String.duplicate("a", 65)}]
           ]
@@ -307,7 +311,10 @@ defmodule Genswarms.Telegram.ObjectsTest do
     assert call.payload.reply_markup == %{
              inline_keyboard: [
                [%{text: "Open", url: "https://example.com"}],
-               [%{text: "Mode", callback_data: "mode quiet"}]
+               [%{text: "Mode", callback_data: "mode quiet"}],
+               [%{text: "App", web_app: %{url: "https://example.com/app"}}],
+               [%{text: "Inline", switch_inline_query_current_chat: "query"}],
+               [%{text: "Copy", copy_text: %{text: "copy me"}}]
              ]
            }
   end
@@ -513,7 +520,14 @@ defmodule Genswarms.Telegram.ObjectsTest do
     refute Map.has_key?(photo, :message_thread_id)
 
     threaded_photo =
-      Sender.build_photo_body("tg:-100123:9", "https://example.com/a.png", "look", "HTML", nil, 42)
+      Sender.build_photo_body(
+        "tg:-100123:9",
+        "https://example.com/a.png",
+        "look",
+        "HTML",
+        nil,
+        42
+      )
 
     assert threaded_photo.message_thread_id == 9
     assert threaded_photo.reply_parameters == %{message_id: 42, allow_sending_without_reply: true}

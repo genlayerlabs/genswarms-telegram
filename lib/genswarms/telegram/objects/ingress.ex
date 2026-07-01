@@ -272,7 +272,8 @@ defmodule Genswarms.Telegram.Objects.Ingress do
     end
   end
 
-  defp command_event?(event), do: Addressing.command_target(Map.get(event, :text, "")) != :not_command
+  defp command_event?(event),
+    do: Addressing.command_target(Map.get(event, :text, "")) != :not_command
 
   defp route_command(kind, event, state) do
     result =
@@ -283,7 +284,9 @@ defmodule Genswarms.Telegram.Objects.Ingress do
 
     case result do
       {:reply, text} ->
-        state = maybe_after_routed(state, event, %{kind: kind, conversation_id: event.conversation_id})
+        state =
+          maybe_after_routed(state, event, %{kind: kind, conversation_id: event.conversation_id})
+
         send_command_reply(event, text, state)
 
       {:send, to, payload} ->
@@ -307,7 +310,9 @@ defmodule Genswarms.Telegram.Objects.Ingress do
         {:send_many, encode_messages(messages), state}
 
       :ok ->
-        state = maybe_after_routed(state, event, %{kind: kind, conversation_id: event.conversation_id})
+        state =
+          maybe_after_routed(state, event, %{kind: kind, conversation_id: event.conversation_id})
+
         {:ok, %{ok: true, command: true, conversation_id: event.conversation_id}, state}
 
       {:error, reason} ->
