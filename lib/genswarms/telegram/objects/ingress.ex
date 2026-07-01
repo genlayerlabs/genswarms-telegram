@@ -3,7 +3,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   Telegram inbound GenSwarms object.
   """
 
-  alias Genswarms.Telegram.{Client, ConversationId, Delivery, Parser, Poller}
+  alias Genswarms.Telegram.{Adapter, Client, ConversationId, Delivery, Parser, Poller}
 
   def init(config \\ %{}) do
     state = new(config)
@@ -14,6 +14,9 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   def new(config \\ %{}) do
     token = Map.get(config, :bot_token) || System.get_env("GENSWARMS_TELEGRAM_BOT_TOKEN")
     bot_ref = Map.get(config, :bot_ref) || Genswarms.Telegram.BotRef.from_token(token)
+
+    inbound_effects =
+      Map.get(config, :inbound_effects, Genswarms.Telegram.InboundEffects.Noop)
 
     %{
       bot_ref: bot_ref,
@@ -27,6 +30,8 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       context_store: Map.get(config, :context_store, Genswarms.Telegram.Context.MemoryMd),
       identity_sink: Map.get(config, :identity_sink, Genswarms.Telegram.IdentitySink.Noop),
       command_router: Map.get(config, :command_router, Genswarms.Telegram.CommandRouter.Basic),
+      inbound_effects: inbound_effects,
+      inbound_effects_state: init_inbound_effects(inbound_effects),
       session_runtime:
         Map.get(config, :session_runtime, Genswarms.Telegram.SessionRuntime.Default),
       session_opts: Map.get(config, :session_opts, %{}),
@@ -100,7 +105,10 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       case result do
         {:ok, updates, _next_offset} ->
           {state, messages, offset, status} = process_polled_updates(updates, state)
-          if is_integer(offset), do: state.store.write_offset(state.bot_ref, offset)
+
+          if is_integer(offset),
+            do: Adapter.call(state.store, :write_offset, [state.bot_ref, offset])
+
           failures = if status == :ok, do: 0, else: state.poll_failures + 1
           {%{state | poll_failures: failures}, messages}
 
@@ -137,12 +145,12 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   defp handle_update(update, state) do
     update_id = Map.get(update, "update_id")
 
-    if state.store.update_seen?(state.bot_ref, update_id) do
+    if Adapter.call(state.store, :update_seen?, [state.bot_ref, update_id]) do
       {:ok, %{ok: true, duplicate: true}, state}
     else
       result =
         case Parser.parse_update(update) do
-          {:ok, event} -> handle_event(event, state)
+          {:ok, event} -> handle_event_with_effects(event, state)
           :ignore -> {:ok, %{ok: true, ignored: true}, state}
           {:error, reason} -> {:error, reason, state}
         end
@@ -151,8 +159,34 @@ defmodule Genswarms.Telegram.Objects.Ingress do
     end
   end
 
+  defp handle_event_with_effects(event, state) do
+    meta = ingress_meta(state)
+
+    if Adapter.exported?(state.inbound_effects, :before_route, 3) do
+      case Adapter.call(state.inbound_effects, :before_route, [
+             event,
+             meta,
+             state.inbound_effects_state
+           ]) do
+        {:cont, event, effects_state} ->
+          handle_event(event, %{state | inbound_effects_state: effects_state})
+
+        {:drop, reason, effects_state} ->
+          skip_event(event, reason, %{state | inbound_effects_state: effects_state})
+
+        {:send, to, payload, effects_state} ->
+          {:send, to, encode_payload(payload), %{state | inbound_effects_state: effects_state}}
+
+        {:send_many, messages, effects_state} ->
+          {:send_many, encode_messages(messages), %{state | inbound_effects_state: effects_state}}
+      end
+    else
+      handle_event(event, state)
+    end
+  end
+
   defp handle_event(%{type: :member, conversation_id: cid, reachable?: true} = event, state) do
-    with :ok <- state.identity_sink.mark_reachable(state.bot_ref, cid, event) do
+    with :ok <- Adapter.call(state.identity_sink, :mark_reachable, [state.bot_ref, cid, event]) do
       {:ok, %{ok: true, member: true}, state}
     else
       {:error, reason} -> {:error, reason, state}
@@ -160,7 +194,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   end
 
   defp handle_event(%{type: :member, conversation_id: cid, reachable?: false} = event, state) do
-    with :ok <- state.identity_sink.mark_unreachable(state.bot_ref, cid, event) do
+    with :ok <- Adapter.call(state.identity_sink, :mark_unreachable, [state.bot_ref, cid, event]) do
       {:ok, %{ok: true, member: true}, state}
     else
       {:error, reason} -> {:error, reason, state}
@@ -169,18 +203,43 @@ defmodule Genswarms.Telegram.Objects.Ingress do
 
   defp handle_event(%{type: :callback, callback_query_id: id} = event, state) do
     _ = Client.answer_callback_query(state.client, %{callback_query_id: id}, client_opts(state))
+    _ = maybe_upsert_identity(state, event)
     route_command(:callback, event, state)
   end
 
   defp handle_event(%{type: :non_text} = event, state) do
-    {:ok, %{ok: true, non_text: true, conversation_id: event.conversation_id}, state}
+    meta = ingress_meta(state)
+
+    result =
+      if Adapter.exported?(state.inbound_effects, :on_non_text, 3) do
+        Adapter.call(state.inbound_effects, :on_non_text, [
+          event,
+          meta,
+          state.inbound_effects_state
+        ])
+      else
+        {:ok, state.inbound_effects_state}
+      end
+
+    case result do
+      {:ok, effects_state} ->
+        {:ok, %{ok: true, non_text: true, conversation_id: event.conversation_id},
+         %{state | inbound_effects_state: effects_state}}
+
+      {:send, to, payload, effects_state} ->
+        {:send, to, encode_payload(payload), %{state | inbound_effects_state: effects_state}}
+
+      {:send_many, messages, effects_state} ->
+        {:send_many, encode_messages(messages), %{state | inbound_effects_state: effects_state}}
+    end
   end
 
   defp handle_event(%{type: :text, text: "/" <> _} = event, state) do
     if command_addressed?(event.text, state.bot_username || discover_username(state)) do
+      _ = maybe_upsert_identity(state, event)
       route_command(:command, event, state)
     else
-      {:ok, %{ok: true, skipped: "not_addressed", conversation_id: event.conversation_id}, state}
+      skip_event(event, "not_addressed", state)
     end
   end
 
@@ -188,20 +247,26 @@ defmodule Genswarms.Telegram.Objects.Ingress do
     if addressed?(event, state) do
       deliver_to_session(event, state)
     else
-      {:ok, %{ok: true, skipped: "not_addressed", conversation_id: event.conversation_id}, state}
+      skip_event(event, "not_addressed", state)
     end
   end
 
   defp route_command(kind, event, state) do
     result =
       case kind do
-        :command -> state.command_router.handle_command(event, state)
-        :callback -> state.command_router.handle_callback(event, state)
+        :command -> Adapter.call(state.command_router, :handle_command, [event, state])
+        :callback -> Adapter.call(state.command_router, :handle_callback, [event, state])
       end
 
     case result do
       {:reply, text} ->
         send_command_reply(event, text, state)
+
+      {:send, to, payload} ->
+        {:send, to, encode_payload(payload), state}
+
+      {:send_many, messages} ->
+        {:send_many, encode_messages(messages), state}
 
       :ok ->
         {:ok, %{ok: true, command: true, conversation_id: event.conversation_id}, state}
@@ -220,13 +285,9 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       })
 
     with :ok <-
-           state.identity_sink.upsert_identity(
-             state.bot_ref,
-             event.conversation_id,
-             event.identity
-           ),
+           maybe_upsert_identity(state, event),
          {:ok, session} <-
-           state.session_runtime.ensure_session(event.conversation_id, session_opts),
+           ensure_session(state.session_runtime, event, session_opts),
          :ok <-
            maybe_init_context(state, event.conversation_id, session[:workspace]),
          :ok <-
@@ -239,9 +300,15 @@ defmodule Genswarms.Telegram.Objects.Ingress do
            ),
          context <- maybe_before_turn(state, event.conversation_id, event.text),
          :ok <-
-           state.session_runtime.deliver_to_session(
+           deliver_to_runtime(
+             state.session_runtime,
              session,
-             context <> "\n" <> event.text,
+             %{
+               conversation_id: event.conversation_id,
+               text: event.text,
+               event: event,
+               context: context
+             },
              session_opts
            ),
          :ok <-
@@ -249,12 +316,13 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       state = %{state | routed: [%{event: event, session: session} | state.routed]}
       {:ok, %{ok: true, routed: true, conversation_id: event.conversation_id}, state}
     else
-      {:error, reason} -> {:error, reason, state}
+      {:error, reason} ->
+        {:error, reason, state}
     end
   end
 
   defp process_polled_updates(updates, state) do
-    start_offset = state.store.read_offset(state.bot_ref)
+    start_offset = Adapter.call(state.store, :read_offset, [state.bot_ref])
 
     Enum.reduce_while(updates, {state, [], start_offset, :ok}, fn update,
                                                                   {acc, messages, offset, _status} ->
@@ -284,7 +352,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   defp mark_processed(result, _state, update_id) when not is_integer(update_id), do: result
 
   defp mark_processed(result, state, update_id) do
-    case state.store.mark_update_seen(state.bot_ref, update_id) do
+    case Adapter.call(state.store, :mark_update_seen, [state.bot_ref, update_id]) do
       :new -> result
       :duplicate -> result
       {:error, reason} -> replace_result_with_error(result, reason)
@@ -322,7 +390,11 @@ defmodule Genswarms.Telegram.Objects.Ingress do
 
   defp maybe_init_context(state, conversation_id, workspace) do
     if context_enabled?(state, conversation_id) do
-      state.context_store.init_session(state.bot_ref, conversation_id, %{workspace: workspace})
+      Adapter.call(state.context_store, :init_session, [
+        state.bot_ref,
+        conversation_id,
+        %{workspace: workspace}
+      ])
     else
       :ok
     end
@@ -330,7 +402,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
 
   defp maybe_before_turn(state, conversation_id, text) do
     if context_enabled?(state, conversation_id) do
-      state.context_store.before_turn(state.bot_ref, conversation_id, text, %{})
+      Adapter.call(state.context_store, :before_turn, [state.bot_ref, conversation_id, text, %{}])
     else
       ""
     end
@@ -338,7 +410,13 @@ defmodule Genswarms.Telegram.Objects.Ingress do
 
   defp maybe_after_turn(state, conversation_id, role, text) do
     if context_enabled?(state, conversation_id) do
-      state.context_store.after_turn(state.bot_ref, conversation_id, role, text, %{})
+      Adapter.call(state.context_store, :after_turn, [
+        state.bot_ref,
+        conversation_id,
+        role,
+        text,
+        %{}
+      ])
     else
       :ok
     end
@@ -356,12 +434,89 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   end
 
   defp bind_session(runtime, session, conversation_id, sinks, opts) do
-    if function_exported?(runtime, :bind_session, 4) do
-      runtime.bind_session(session, conversation_id, sinks, opts)
+    if Adapter.exported?(runtime, :bind_session, 4) do
+      Adapter.call(runtime, :bind_session, [session, conversation_id, sinks, opts])
     else
       :ok
     end
   end
+
+  defp ensure_session(runtime, event, opts) do
+    if Adapter.exported?(runtime, :ensure_session, 3) do
+      Adapter.call(runtime, :ensure_session, [event.conversation_id, event, opts])
+    else
+      Adapter.call(runtime, :ensure_session, [event.conversation_id, opts])
+    end
+  end
+
+  defp deliver_to_runtime(runtime, session, turn, opts) do
+    cond do
+      Adapter.exported?(runtime, :deliver_turn, 3) ->
+        Adapter.call(runtime, :deliver_turn, [session, turn, opts])
+
+      Adapter.exported?(runtime, :deliver_to_session, 3) ->
+        prefix = if String.trim(to_string(turn.context)) == "", do: "", else: turn.context <> "\n"
+        Adapter.call(runtime, :deliver_to_session, [session, prefix <> turn.text, opts])
+
+      true ->
+        {:error, :no_session_delivery_callback}
+    end
+  end
+
+  defp maybe_upsert_identity(state, event) do
+    Adapter.call(state.identity_sink, :upsert_identity, [
+      state.bot_ref,
+      event.conversation_id,
+      Map.get(event, :identity, %{})
+    ])
+  end
+
+  defp skip_event(event, reason, state) do
+    state =
+      if Adapter.exported?(state.inbound_effects, :on_skipped, 4) do
+        case Adapter.call(state.inbound_effects, :on_skipped, [
+               event,
+               reason,
+               ingress_meta(state),
+               state.inbound_effects_state
+             ]) do
+          {:ok, effects_state} -> %{state | inbound_effects_state: effects_state}
+          _ -> state
+        end
+      else
+        state
+      end
+
+    {:ok,
+     %{ok: true, skipped: to_string(reason), conversation_id: Map.get(event, :conversation_id)},
+     state}
+  end
+
+  defp init_inbound_effects(adapter) do
+    if Adapter.exported?(adapter, :init, 1) do
+      case Adapter.call(adapter, :init, [Adapter.opts(adapter)]) do
+        {:ok, state} -> state
+        state -> state
+      end
+    else
+      %{}
+    end
+  end
+
+  defp ingress_meta(state) do
+    %{
+      bot_ref: state.bot_ref,
+      bot_username: state.bot_username,
+      sender: state.sender,
+      binding_authority: state.binding_authority
+    }
+  end
+
+  defp encode_messages(messages),
+    do: Enum.map(messages, fn {to, payload} -> {to, encode_payload(payload)} end)
+
+  defp encode_payload(payload) when is_binary(payload), do: payload
+  defp encode_payload(payload) when is_map(payload), do: Jason.encode!(payload)
 
   defp addressed?(event, state) do
     case ConversationId.chat_type(event.conversation_id) do

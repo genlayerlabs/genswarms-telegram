@@ -16,21 +16,18 @@ defmodule Genswarms.Telegram.SessionRuntime.Default do
     prefix = slot_prefix(opts)
     pool_size = pool_size(opts)
     bot_ref = Map.get(opts, :bot_ref, "default") |> Genswarms.Telegram.BotRef.path_key()
-    {slot, evicted} = lease_slot(conversation_id, prefix, pool_size, bot_ref, opts)
-
-    workspace =
-      Path.join([
-        workspace_root(opts),
-        bot_ref,
-        Genswarms.Telegram.ConversationId.encode_for_path(conversation_id)
-      ])
+    {slot, evicted, fresh?} = lease_slot(conversation_id, prefix, pool_size, bot_ref, opts)
+    workspace = session_workspace(opts, bot_ref, conversation_id, slot)
 
     if Map.get(opts, :wipe_workspace_on_ensure, false), do: File.rm_rf(workspace)
     File.mkdir_p!(workspace)
 
-    env = %{
-      Map.get(opts, :conversation_env, "GENSWARMS_TELEGRAM_CONVERSATION_ID") => conversation_id
-    }
+    env =
+      opts
+      |> Map.get(:extra_env, %{})
+      |> Map.merge(%{
+        Map.get(opts, :conversation_env, "GENSWARMS_TELEGRAM_CONVERSATION_ID") => conversation_id
+      })
 
     session = %{
       slot: slot,
@@ -38,7 +35,8 @@ defmodule Genswarms.Telegram.SessionRuntime.Default do
       workspace: workspace,
       env: env,
       binding_sinks: Map.get(opts, :binding_sinks, []),
-      evicted: evicted
+      evicted: evicted,
+      fresh?: fresh?
     }
 
     with :ok <- maybe_spawn_agent(session, opts) do
@@ -94,15 +92,18 @@ defmodule Genswarms.Telegram.SessionRuntime.Default do
         maybe_remove_agent(swarm_name, evicted.slot)
       end
 
-      spec = %{
-        name: session.slot,
-        backend:
-          backend_with_session(
-            template[:backend] || Map.get(template, "backend") || :local,
-            session
-          ),
-        skills: template[:skills] || Map.get(template, "skills") || []
-      }
+      spec =
+        template
+        |> drop_route_keys()
+        |> Map.merge(%{
+          name: session.slot,
+          backend:
+            backend_with_session(
+              template[:backend] || Map.get(template, "backend") || :local,
+              session
+            ),
+          skills: template[:skills] || Map.get(template, "skills") || []
+        })
 
       route_opts = [
         connections:
@@ -198,7 +199,10 @@ defmodule Genswarms.Telegram.SessionRuntime.Default do
   end
 
   defp backend_with_session({:bwrap, backend_opts}, session) when is_map(backend_opts) do
-    {:bwrap, Map.merge(backend_opts, %{workspace: session.workspace, extra_env: session.env})}
+    {:bwrap,
+     backend_opts
+     |> Map.put(:workspace, session.workspace)
+     |> Map.update(:extra_env, session.env, &Map.merge(&1, session.env))}
   end
 
   defp backend_with_session({:docker, image, backend_opts}, session) when is_map(backend_opts) do
@@ -218,14 +222,14 @@ defmodule Genswarms.Telegram.SessionRuntime.Default do
     :global.trans({__MODULE__, key}, fn ->
       ensure_pool_table()
       pool = read_pool(key, prefix, pool_size)
-      {slot, evicted, pool} = pool_lease(pool, conversation_id)
+      {slot, evicted, fresh?, pool} = pool_lease(pool, conversation_id)
       :ets.insert(@pool_table, {key, pool})
 
       if evicted && Map.get(opts, :wipe_workspace_on_evict, true) do
-        File.rm_rf(evicted_workspace(evicted.conversation_id, bot_ref, opts))
+        File.rm_rf(session_workspace(opts, bot_ref, evicted.conversation_id, evicted.slot))
       end
 
-      {slot, evicted}
+      {slot, evicted, fresh?}
     end)
   end
 
@@ -273,7 +277,7 @@ defmodule Genswarms.Telegram.SessionRuntime.Default do
                 conversation_id
               )
 
-            {slot, nil, pool}
+            {slot, nil, true, pool}
 
           [] ->
             {victim, _seq} = Enum.min_by(pool.seq, fn {_cid, seq} -> seq end)
@@ -287,11 +291,11 @@ defmodule Genswarms.Telegram.SessionRuntime.Default do
                 conversation_id
               )
 
-            {slot, evicted, pool}
+            {slot, evicted, true, pool}
         end
 
       slot ->
-        {slot, nil, touch(pool, conversation_id)}
+        {slot, nil, false, touch(pool, conversation_id)}
     end
   end
 
@@ -309,12 +313,28 @@ defmodule Genswarms.Telegram.SessionRuntime.Default do
     ArgumentError -> @pool_table
   end
 
-  defp evicted_workspace(conversation_id, bot_ref, opts) do
-    Path.join([
-      workspace_root(opts),
-      bot_ref,
-      Genswarms.Telegram.ConversationId.encode_for_path(conversation_id)
-    ])
+  defp session_workspace(opts, bot_ref, conversation_id, slot) do
+    case Map.get(opts, :workspace_pattern) do
+      pattern when is_binary(pattern) ->
+        pattern
+        |> String.replace("{slot}", to_string(slot))
+        |> String.replace(
+          "{conversation_id}",
+          Genswarms.Telegram.ConversationId.encode_for_path(conversation_id)
+        )
+        |> String.replace("{bot_ref}", bot_ref)
+
+      _ ->
+        if Map.get(opts, :workspace_by) == :slot do
+          Path.join(workspace_root(opts), to_string(slot))
+        else
+          Path.join([
+            workspace_root(opts),
+            bot_ref,
+            Genswarms.Telegram.ConversationId.encode_for_path(conversation_id)
+          ])
+        end
+    end
   end
 
   defp slot_prefix(opts) do
@@ -328,5 +348,9 @@ defmodule Genswarms.Telegram.SessionRuntime.Default do
       value when is_integer(value) and value > 0 -> value
       _ -> 32
     end
+  end
+
+  defp drop_route_keys(template) do
+    Map.drop(template, [:connections, "connections", :incoming, "incoming", :persist, "persist"])
   end
 end

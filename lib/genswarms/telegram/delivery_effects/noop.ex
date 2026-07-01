@@ -12,4 +12,10 @@ defmodule Genswarms.Telegram.DeliveryEffects.Noop do
 
   @impl true
   def redact_outbound(text, _meta), do: text
+
+  @impl true
+  def after_delivery(_delivery, _outcome, _meta), do: :ok
+
+  @impl true
+  def on_unreachable(_conversation_id, _reason, _meta), do: :ok
 end

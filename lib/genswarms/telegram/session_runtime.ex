@@ -10,9 +10,11 @@ defmodule Genswarms.Telegram.SessionRuntime do
         }
 
   @callback ensure_session(String.t(), map()) :: {:ok, session()} | {:error, term()}
+  @callback ensure_session(String.t(), map(), map()) :: {:ok, session()} | {:error, term()}
   @callback bind_session(session(), String.t(), [atom()], map()) :: :ok | {:error, term()}
   @callback deliver_to_session(session(), String.t(), map()) :: :ok | {:error, term()}
+  @callback deliver_turn(session(), map(), map()) :: :ok | {:error, term()}
   @callback teardown_session(session(), term(), map()) :: :ok | {:error, term()}
 
-  @optional_callbacks bind_session: 4
+  @optional_callbacks ensure_session: 3, bind_session: 4, deliver_turn: 3
 end

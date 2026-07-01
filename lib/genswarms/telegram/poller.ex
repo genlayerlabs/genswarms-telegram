@@ -7,10 +7,10 @@ defmodule Genswarms.Telegram.Poller do
   replays through the normal update-id dedupe path instead of skipping messages.
   """
 
-  alias Genswarms.Telegram.Client
+  alias Genswarms.Telegram.{Adapter, Client}
 
   def fetch_updates(client, store, bot_ref, opts \\ []) do
-    offset = store.read_offset(bot_ref)
+    offset = Adapter.call(store, :read_offset, [bot_ref])
     payload = get_updates_payload(offset, opts)
 
     case Client.get_updates(client, payload, Keyword.fetch!(opts, :client_opts)) do
