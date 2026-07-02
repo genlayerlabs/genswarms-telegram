@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 - 2026-07-02
+
+### Documentation
+
+- Added the `genswarms-telegram-use` Claude Code skill and declared it in
+  `swarmidx.json` via the manifest `skill` field, so consuming agents can load
+  package usage guidance through swarmidx.
+
 ## 0.2.0 - 2026-07-02
 
 ### Security
