@@ -1,6 +1,6 @@
 {
   "registry": {
-    "scope": "acastellana"
+    "scope": "genlayerlabs"
   },
   "packages": [
     {
@@ -8,7 +8,10 @@
       "dir": ".",
       "kind": "handler",
       "description": "Reusable Telegram transport and GenSwarms object handlers",
-      "skill": ".claude/skills/genswarms-telegram-use/SKILL.md"
+      "skill": ".claude/skills/genswarms-telegram-use/SKILL.md",
+      "module": "Genswarms.Telegram.Objects.Ingress",
+      "deps": ["genlayerlabs/genswarms-dashboard@0.2.0"],
+      "note": "deps: the Dashboard module implements genswarms-dashboard's extension contract (schema 1) — data-shaped, no compile dep; the registry dep declares the pairing (design §9)."
     }
   ]
 }
