@@ -1,0 +1,4 @@
+{
+  "module": "Genswarms.Telegram.Objects.Ingress",
+  "note": "Primary inbound object; Objects.Sender ships alongside. Consumed as a mix dep (loader :verify attestation) — the files list for :require-mode loading is deliberately omitted until an IR-cast swarm needs it."
+}
