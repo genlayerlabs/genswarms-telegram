@@ -293,8 +293,18 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp dispatch(from, %{"action" => action} = msg, state) do
     case authorize_action(from, action, msg, state) do
-      {:ok, gate} -> dispatch_authorized(from, Map.put(msg, @gate_key, gate), state)
-      {:error, reason} -> {:error, reason, state}
+      {:ok, gate} ->
+        dispatch_authorized(from, Map.put(msg, @gate_key, gate), state)
+
+      {:error, :unbound_slot} when action == "reply" ->
+        # An agent slot replied but has no session binding: the user's turn
+        # goes unanswered and the delivery never happens — the modern shape of
+        # the legacy "unresolvable reply". Surface it to the host.
+        _ = maybe_effect(state, :reply_unresolvable, [from, %{origin: :reply}])
+        {:error, :unbound_slot, state}
+
+      {:error, reason} ->
+        {:error, reason, state}
     end
   end
 
@@ -1295,8 +1305,16 @@ defmodule Genswarms.Telegram.Objects.Sender do
         end
       end
     else
-      {:suppress, state} -> {:ok, state}
-      {:error, reason} -> {:error, reason, state}
+      {:suppress, state} ->
+        {:ok, state}
+
+      {:error, reason} ->
+        # A conversational reply that never resolved to a target is a real
+        # fault (the user is left unanswered) — surface it to the host.
+        if origin in [:reply, :slot_reply],
+          do: _ = maybe_effect(state, :reply_unresolvable, [from, %{origin: origin}])
+
+        {:error, reason, state}
     end
   end
 
@@ -2583,8 +2601,12 @@ defmodule Genswarms.Telegram.Objects.Sender do
     state = record_send(state, cid, payload, result)
 
     case message_id_from_result(result) do
-      {:ok, id} -> {:ok, id, state}
-      :error -> {:error, state}
+      {:ok, id} ->
+        _ = maybe_effect(state, :progress_sent, [cid, :post, %{}])
+        {:ok, id, state}
+
+      :error ->
+        {:error, state}
     end
   end
 
@@ -2603,6 +2625,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
       _ = Client.edit_message_text(state.client, payload, client_opts(state))
     end
 
+    _ = maybe_effect(state, :progress_sent, [cid, :edit, %{}])
     :ok
   end
 
@@ -2612,6 +2635,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
         {:error, :invalid_slot_reply, state}
 
       Map.get(state.owed, cid, 0) == 0 and answered_recently?(cid, state) ->
+        _ = maybe_effect(state, :reply_suppressed, [cid, %{origin: :slot_reply, from: from}])
         {:ok, state}
 
       true ->
@@ -3222,6 +3246,17 @@ defmodule Genswarms.Telegram.Objects.Sender do
     end
   end
 
+  # Optional observability hooks (reply_suppressed / progress_sent /
+  # reply_unresolvable) — paths with no logical delivery, so after_delivery
+  # never sees them. No-op unless the host effects module exports the callback.
+  defp maybe_effect(state, fun, args) do
+    if Adapter.exported?(state.delivery_effects, fun, length(args)) do
+      _ = Adapter.call(state.delivery_effects, fun, args)
+    end
+
+    :ok
+  end
+
   defp maybe_on_unreachable(state, cid, reason, meta) do
     if Adapter.exported?(state.delivery_effects, :on_unreachable, 3) do
       Adapter.call(state.delivery_effects, :on_unreachable, [cid, reason, meta])
@@ -3512,6 +3547,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
   defp prepare_delivery(from, cid, :reply, state) do
     if agent_slot?(from, state) and Map.get(state.owed, cid, 0) == 0 and
          answered_recently?(cid, state) do
+      _ = maybe_effect(state, :reply_suppressed, [cid, %{origin: :reply, from: from}])
       {:suppress, state}
     else
       {:cont, reply_typing(cid, state)}
