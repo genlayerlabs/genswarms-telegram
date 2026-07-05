@@ -115,7 +115,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
   def new(config \\ %{}) do
     validate_action_table!()
 
-    token = Map.get(config, :bot_token) || System.get_env("GENSWARMS_TELEGRAM_BOT_TOKEN")
+    token = Genswarms.Telegram.BotRef.resolve_token(config)
     binding_authority = Map.get(config, :binding_authority, :telegram_ingress)
 
     %{

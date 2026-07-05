@@ -1,4 +1,61 @@
 {
   "module": "Genswarms.Telegram.Objects.Ingress",
-  "note": "Primary inbound object; Objects.Sender ships alongside. Consumed as a mix dep (loader :verify attestation) — the files list for :require-mode loading is deliberately omitted until an IR-cast swarm needs it."
+  "note": "Primary inbound object; Objects.Sender ships alongside. Consumed as a mix dep (loader :verify attestation) — the files list for :require-mode loading is deliberately omitted until an IR-cast swarm needs it. config_schema covers the Ingress; a Sender schema can follow the same pattern.",
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "bot_token": {
+        "type": "string",
+        "x-secret": true,
+        "description": "Literal bot token (tests/legacy only — prefer bot_token_env)."
+      },
+      "bot_token_env": {
+        "type": "string",
+        "x-secret": true,
+        "default": "GENSWARMS_TELEGRAM_BOT_TOKEN",
+        "description": "NAME of the env var holding the bot token; resolved by the object at init, never stored in config."
+      },
+      "bot_ref": {
+        "type": "string",
+        "description": "Non-secret bot namespace (default: fingerprint of the token)."
+      },
+      "bot_username": {
+        "type": "string",
+        "description": "Bot @username for group-mention addressing (env fallback GENSWARMS_TELEGRAM_BOT_USERNAME)."
+      },
+      "fail_open_without_username?": {
+        "type": "boolean",
+        "default": false,
+        "description": "Whether group addressing works without a known username (fail-closed by default)."
+      },
+      "inbound_effects": { "type": "string", "description": "InboundEffects module (default Noop)." },
+      "client": { "type": "string", "description": "Bot API client adapter (default Client.Curl)." },
+      "client_opts": { "type": "array", "description": "Extra adapter opts." },
+      "store": { "type": "string", "description": "Offset/store module (default Store.File)." },
+      "context_store": { "type": "string", "description": "Durable per-conversation context (default Context.MemoryMd)." },
+      "identity_sink": { "type": "string", "description": "IdentitySink module (default Noop)." },
+      "command_router": { "type": "string", "description": "Slash-command router (default CommandRouter.Basic)." },
+      "session_runtime": { "type": "string", "description": "SessionRuntime module (default Default)." },
+      "session_opts": { "type": "object", "description": "Session runtime options (slot pool, backend, skills, llm proxy…)." },
+      "sender": { "type": "string", "description": "Sender object name (default telegram_sender)." },
+      "binding_authority": { "type": "string", "description": "Node authoritative for slot bindings (default telegram_ingress)." },
+      "binding_sinks": { "type": "array", "description": "Nodes notified of slot bindings." },
+      "memory_policy": {
+        "type": "string",
+        "enum": ["none", "dm_only", "all"],
+        "default": "none",
+        "x-mutable": true,
+        "description": "Durable MEMORY.md policy."
+      },
+      "poll_enabled": {
+        "type": "boolean",
+        "default": false,
+        "x-mutable": true,
+        "description": "getUpdates long-polling on/off (single consumer per token)."
+      },
+      "poll_interval_ms": { "type": "integer", "default": 1500, "x-mutable": true },
+      "poll_timeout_s": { "type": "integer", "default": 25, "x-mutable": true },
+      "allowed_updates": { "type": "array", "x-mutable": true, "description": "Telegram update types requested from getUpdates." }
+    }
+  }
 }
