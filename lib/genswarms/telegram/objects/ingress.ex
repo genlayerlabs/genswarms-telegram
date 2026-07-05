@@ -13,7 +13,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   end
 
   def new(config \\ %{}) do
-    token = Map.get(config, :bot_token) || System.get_env("GENSWARMS_TELEGRAM_BOT_TOKEN")
+    token = Genswarms.Telegram.BotRef.resolve_token(config)
     bot_ref = Map.get(config, :bot_ref) || Genswarms.Telegram.BotRef.from_token(token)
 
     inbound_effects =
