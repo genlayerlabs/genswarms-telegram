@@ -39,7 +39,10 @@ defmodule Genswarms.Telegram.NeutralityTest do
   end
 
   defp forbidden_regex do
-    terms = ["wing" <> "ston", "ra" <> "lly", "sub" <> "zero"]
+    # "Subzero Claw" — the stack component's proper name in the /about text —
+    # is deliberately permitted; bare "subzero" / "subzero-swarm" stays
+    # forbidden (that's the accidental-internals leak this gate exists for).
+    terms = ["wing" <> "ston", "ra" <> "lly", "sub" <> "zero" <> "(?!\\s+claw)"]
     Regex.compile!("\\b(" <> Enum.join(terms, "|") <> ")\\b", "i")
   end
 end
