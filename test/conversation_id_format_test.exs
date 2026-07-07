@@ -217,6 +217,24 @@ defmodule Genswarms.Telegram.ConversationIdFormatTest do
     assert Basic.command_menu(:group, %{}) == [%{command: "help", description: "Help"}]
   end
 
+  test "basic command router answers /about with the stack text, off the command menu" do
+    assert {:reply, about} = Basic.handle_command(%{text: "/about"}, %{})
+    assert about =~ "GenLayer stack"
+    assert about =~ "Subzeroclaw"
+    assert about =~ "subzeroclaw.com"
+    assert about =~ "unhardcoded.com"
+    assert about =~ "genswarms.com"
+    assert about =~ "genlayer.com"
+    assert about =~ "https://genlayerlabs.com"
+
+    # group-form verb with bot suffix routes the same
+    assert Basic.handle_command(%{text: "/about@ExampleBot"}, %{}) == {:reply, about}
+
+    # deliberately NOT advertised: menus stay start/help only
+    refute "about" in Enum.map(Basic.command_menu(:dm, %{}), & &1.command)
+    refute "about" in Enum.map(Basic.command_menu(:group, %{}), & &1.command)
+  end
+
   test "bot refs never expose raw tokens or unsafe path segments" do
     ref = BotRef.from_token("123:SECRET")
 
