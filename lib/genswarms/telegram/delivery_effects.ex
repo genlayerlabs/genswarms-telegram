@@ -44,6 +44,17 @@ defmodule Genswarms.Telegram.DeliveryEffects do
   @callback reply_unresolvable(term(), map()) :: :ok
   @callback reply_unresolvable(term(), map(), map()) :: :ok
 
+  @doc """
+  Asked once at sender init: the CURRENT slot→conversation bindings, so a
+  restarted sender (whose claims are process-local) re-seeds them instead of
+  dropping in-flight agent replies as "no target" until the next inbound
+  re-binds. Return a list of `%{slot: ..., conversation_id: ...}` maps
+  (atom or string keys); anything else — or a raise — is treated as "no
+  bindings". Hosts without a live session registry simply don't implement it.
+  """
+  @callback current_bindings() :: [map()]
+  @callback current_bindings(map()) :: [map()]
+
   @optional_callbacks before_send: 2,
                       after_send: 3,
                       delivery_failed: 3,
@@ -57,5 +68,7 @@ defmodule Genswarms.Telegram.DeliveryEffects do
                       progress_sent: 3,
                       progress_sent: 4,
                       reply_unresolvable: 2,
-                      reply_unresolvable: 3
+                      reply_unresolvable: 3,
+                      current_bindings: 0,
+                      current_bindings: 1
 end

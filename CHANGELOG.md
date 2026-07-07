@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.3 - 2026-07-07
+
+### Added
+
+- Sender claim re-seed at init: new optional delivery-effects callback
+  `current_bindings/0` (or `/1` for tuple adapters). The sender's
+  slot→conversation claims are process-local, so a sender restart used to
+  drop in-flight agent replies as "no target" until the conversation's next
+  inbound re-bound it. Hosts with a live session registry can now hand the
+  current bindings back at init; the seam is TOTAL (a raising or malformed
+  host implementation degrades to the old cold start) and hosts without it
+  are unchanged.
+
 ## 0.4.2 - 2026-07-07
 
 ### Changed

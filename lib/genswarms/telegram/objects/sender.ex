@@ -124,6 +124,9 @@ defmodule Genswarms.Telegram.Objects.Sender do
     token = Genswarms.Telegram.BotRef.resolve_token(config)
     binding_authority = Map.get(config, :binding_authority, :telegram_ingress)
 
+    delivery_effects =
+      Map.get(config, :delivery_effects, Genswarms.Telegram.DeliveryEffects.Noop)
+
     %{
       bot_ref: Map.get(config, :bot_ref) || Genswarms.Telegram.BotRef.from_token(token),
       token: token,
@@ -134,7 +137,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
       window: [],
       binding_authority: binding_authority,
       slot_prefix: Map.get(config, :slot_prefix, "telegram_agent"),
-      slots: %{},
+      slots: restore_bindings(delivery_effects),
       send_sources: Map.get(config, :send_sources, [binding_authority]),
       progress_sources: Map.get(config, :progress_sources, [binding_authority]),
       typing_sources: Map.get(config, :typing_sources, [binding_authority]),
@@ -145,8 +148,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
       audit_sources: Map.get(config, :audit_sources, [binding_authority]) || [binding_authority],
       own_message_window: Map.get(config, :own_message_window, 200),
       own_messages: %{},
-      delivery_effects:
-        Map.get(config, :delivery_effects, Genswarms.Telegram.DeliveryEffects.Noop),
+      delivery_effects: delivery_effects,
       identity_sink: Map.get(config, :identity_sink, Genswarms.Telegram.IdentitySink.Noop),
       inbound: %{},
       typing: %{},
@@ -3555,6 +3557,33 @@ defmodule Genswarms.Telegram.Objects.Sender do
   end
 
   defp valid_cid?(cid), do: is_binary(cid) and ConversationId.valid?(cid)
+
+  # Re-seed slot→conversation claims from the host at init (2026-07-07): the
+  # claims are process-local, so any sender restart used to drop in-flight
+  # agent replies as "no target" until the conversation's next inbound
+  # re-bound it. TOTAL on purpose — a host bug here must degrade to the old
+  # cold-start behavior, never block the sender from booting.
+  defp restore_bindings(effects) do
+    if Adapter.exported?(effects, :current_bindings, 0) do
+      case Adapter.call(effects, :current_bindings, []) do
+        bindings when is_list(bindings) ->
+          for b when is_map(b) <- bindings,
+              slot = Map.get(b, :slot) || Map.get(b, "slot"),
+              cid = Map.get(b, :conversation_id) || Map.get(b, "conversation_id"),
+              (is_binary(slot) or is_atom(slot)) and valid_cid?(cid),
+              into: %{} do
+            {to_string(slot), cid}
+          end
+
+        _other ->
+          %{}
+      end
+    else
+      %{}
+    end
+  rescue
+    _ -> %{}
+  end
 
   defp agent_like?(from, state), do: String.starts_with?(from, state.slot_prefix <> "_")
 
