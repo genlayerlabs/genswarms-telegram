@@ -30,6 +30,12 @@ defmodule Genswarms.Telegram.Objects.Sender do
   @max_typing_ticks 15
   @progress_text_max 200
   @spam_window_ms 30_000
+  # Coalesce-instead-of-swallow bounds (2026-07-07): extra agent replies inside
+  # the spam window are HELD and flushed as one message when it expires; these
+  # caps make overflow degrade to the original pure suppression.
+  @held_max_texts 3
+  @held_max_chars 3_000
+  @held_cids_max 500
   @gate_key "__telegram_gate__"
   @utility_actions ~w(
     get_user_profile_photos
@@ -146,6 +152,8 @@ defmodule Genswarms.Telegram.Objects.Sender do
       typing: %{},
       owed: %{},
       last_reply_ms: %{},
+      last_reply_sig: %{},
+      held: %{},
       progress: %{},
       progress_min_interval_ms: Map.get(config, :progress_min_interval_ms, 1_500),
       progress_max_edits: Map.get(config, :progress_max_edits, 20),
@@ -235,7 +243,8 @@ defmodule Genswarms.Telegram.Objects.Sender do
            state
            | typing: Map.delete(state.typing, cid),
              owed: Map.delete(state.owed, cid),
-             last_reply_ms: Map.delete(state.last_reply_ms, cid)
+             last_reply_ms: Map.delete(state.last_reply_ms, cid),
+             last_reply_sig: Map.delete(state.last_reply_sig, cid)
          }}
 
       n ->
@@ -288,6 +297,8 @@ defmodule Genswarms.Telegram.Objects.Sender do
         end
     end
   end
+
+  def handle_info({:flush_held, cid}, state), do: {:noreply, flush_held(cid, state)}
 
   def handle_info(_msg, state), do: {:noreply, state}
 
@@ -444,6 +455,9 @@ defmodule Genswarms.Telegram.Objects.Sender do
           state
           |> note_inbound(cid, Map.get(msg, "message_id"))
           |> Map.update!(:owed, &Map.update(&1, cid, 1, fn n -> n + 1 end))
+          # a held tail from the PREVIOUS turn flushes now, so it lands before
+          # the answer to this new message (order preserved for the user)
+          |> then(&flush_held(cid, &1))
         else
           state
         end
@@ -1300,13 +1314,13 @@ defmodule Genswarms.Telegram.Objects.Sender do
                from: from,
                mark: Map.get(msg, "mark")
              }) do
-          {:ok, state} -> {:ok, stamp_reply(state, cid, origin)}
+          {:ok, state} -> {:ok, state |> stamp_reply(cid, origin) |> stamp_sig(cid, text, origin)}
           other -> other
         end
       end
     else
-      {:suppress, state} ->
-        {:ok, state}
+      {:suppress, cid, state} ->
+        {:ok, hold_reply(from, cid, Map.get(msg, "text", ""), state)}
 
       {:error, reason} ->
         # A conversational reply that never resolved to a target is a real
@@ -1414,7 +1428,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
            ) do
       {:ok, stamp_reply(state, cid, origin)}
     else
-      {:suppress, state} -> {:ok, state}
+      {:suppress, _cid, state} -> {:ok, state}
       {:error, errors} when is_list(errors) -> {:error, {:invalid_card, errors}, state}
       {:error, reason} -> {:error, reason, state}
     end
@@ -1737,7 +1751,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
       {:ok, stamp_reply(state, cid, origin)}
     else
-      {:suppress, state} -> {:ok, state}
+      {:suppress, _cid, state} -> {:ok, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
@@ -2090,7 +2104,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
       {:ok, stamp_reply(state, cid, origin)}
     else
-      {:suppress, state} -> {:ok, state}
+      {:suppress, _cid, state} -> {:ok, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
@@ -2559,7 +2573,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
           {:error, reason, state}
       end
     else
-      {:suppress, state} -> {:ok, state}
+      {:suppress, _cid, state} -> {:ok, state}
       {:error, reason} -> {:error, reason, state}
     end
   end
@@ -2636,7 +2650,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
       Map.get(state.owed, cid, 0) == 0 and answered_recently?(cid, state) ->
         _ = maybe_effect(state, :reply_suppressed, [cid, %{origin: :slot_reply, from: from}])
-        {:ok, state}
+        {:ok, hold_reply(from, cid, content, state)}
 
       true ->
         send_text(:internal, %{"conversation_id" => cid, "text" => content}, state, :slot_reply)
@@ -3548,7 +3562,9 @@ defmodule Genswarms.Telegram.Objects.Sender do
     if agent_slot?(from, state) and Map.get(state.owed, cid, 0) == 0 and
          answered_recently?(cid, state) do
       _ = maybe_effect(state, :reply_suppressed, [cid, %{origin: :reply, from: from}])
-      {:suppress, state}
+      # the resolved cid travels with :suppress — the caller's `with` else
+      # can't see the chain's bindings, and the hold needs the target
+      {:suppress, cid, state}
     else
       {:cont, reply_typing(cid, state)}
     end
@@ -3562,6 +3578,91 @@ defmodule Genswarms.Telegram.Objects.Sender do
   defp stamp_reply(state, _cid, _origin), do: state
 
   defp agent_slot?(from, state), do: Map.has_key?(state.slots, to_string(from))
+
+  # ── coalesce-instead-of-swallow (2026-07-07) ────────────────────────────────
+  # A legit multi-part answer used to die at the gate above: part 1 consumed
+  # `owed` and armed the window, part 2 — often the substance ("am I
+  # whitelisted?" answers in prod) — was dropped. Held texts flush as ONE real
+  # message when the window expires (edits don't notify on Telegram, so
+  # append-by-edit would deliver the answer silently). Exact replays of the
+  # just-delivered text — the original spam case — still die.
+  defp hold_reply(from, cid, text, state) do
+    text = String.trim(to_string(text))
+    cur = Map.get(state.held, cid)
+    held_len = if cur, do: cur.texts |> Enum.map(&String.length/1) |> Enum.sum(), else: 0
+
+    cond do
+      text == "" -> state
+      sig(text) == Map.get(state.last_reply_sig, cid) -> state
+      cur != nil and text in cur.texts -> state
+      cur == nil and map_size(state.held) >= @held_cids_max -> state
+      cur != nil and length(cur.texts) >= @held_max_texts -> state
+      held_len + String.length(text) > @held_max_chars -> state
+      true ->
+        state = if cur == nil, do: schedule_held_flush(cid, state), else: state
+
+        held =
+          Map.update(state.held, cid, %{texts: [text], from: from}, fn h ->
+            %{h | texts: h.texts ++ [text], from: from}
+          end)
+
+        %{state | held: held}
+    end
+  end
+
+  # fire when the window expires; the margin absorbs monotonic/timer jitter so
+  # the flush never lands answered_recently? still true
+  defp schedule_held_flush(cid, state) do
+    elapsed =
+      case Map.get(state.last_reply_ms, cid) do
+        nil -> @spam_window_ms
+        t -> monotonic_ms() - t
+      end
+
+    Process.send_after(self(), {:flush_held, cid}, max(@spam_window_ms - elapsed, 0) + 250)
+    state
+  end
+
+  # Deliberately BYPASSES prepare_delivery: the flush is the gate's own output.
+  # Stamping last_reply re-arms the window, so a relentlessly chatty agent
+  # converges to one message per window — a rate limit, not censorship.
+  defp flush_held(cid, state) do
+    case Map.pop(state.held, cid) do
+      {nil, _held} ->
+        state
+
+      {%{texts: texts, from: from}, held} ->
+        state = %{state | held: held}
+        text = Enum.join(texts, "\n\n")
+
+        text =
+          Adapter.call(state.delivery_effects, :redact_outbound, [
+            text,
+            %{conversation_id: cid, origin: :reply, from: from}
+          ])
+
+        if String.trim(to_string(text)) == "" do
+          state
+        else
+          state = clear_progress(cid, state)
+
+          {:ok, state} =
+            do_send_text(cid, text, %{}, state, %{origin: :reply, from: from, coalesced: true})
+
+          state |> stamp_reply(cid, :reply) |> stamp_sig(cid, text, :reply)
+        end
+    end
+  end
+
+  defp sig(text), do: :erlang.phash2(text |> to_string() |> String.trim())
+
+  defp stamp_sig(state, cid, text, origin) when origin in [:reply, :slot_reply] do
+    sigs = if map_size(state.last_reply_sig) > 10_000, do: %{}, else: state.last_reply_sig
+    %{state | last_reply_sig: Map.put(sigs, cid, sig(text))}
+  end
+
+  defp stamp_sig(state, _cid, _text, _origin), do: state
+
 
   defp answered_recently?(cid, state) do
     case Map.get(state.last_reply_ms, cid) do

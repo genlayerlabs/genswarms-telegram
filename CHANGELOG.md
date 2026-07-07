@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.2 - 2026-07-07
+
+### Changed
+
+- Sender spam window: coalesce instead of swallow. Extra agent replies inside
+  the 30s window are now HELD per conversation and flushed as ONE real message
+  when the window expires (a rate limit, not censorship) — multi-part answers
+  no longer lose their substance to the gate. A new inbound flushes the held
+  tail immediately (order preserved); exact replays of the just-delivered text
+  still die (the original spam case); caps (3 texts / 3000 chars / 500 cids)
+  degrade to the previous pure suppression; rich/card paths keep the previous
+  behavior. Wire-compatible: `reply_suppressed` still fires on hold, and the
+  flush emits a normal delivery.
+
 ## 0.4.1 - 2026-07-07
 
 ### Added
