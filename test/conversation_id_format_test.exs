@@ -220,7 +220,11 @@ defmodule Genswarms.Telegram.ConversationIdFormatTest do
   test "basic command router answers /about with the stack text, off the command menu" do
     assert {:reply, about} = Basic.handle_command(%{text: "/about"}, %{})
     assert about =~ "GenLayer stack"
-    assert about =~ "Subzero Claw"
+    assert about =~ "Subzeroclaw"
+    assert about =~ "subzeroclaw.com"
+    assert about =~ "unhardcoded.com"
+    assert about =~ "genswarms.com"
+    assert about =~ "genlayer.com"
     assert about =~ "https://genlayerlabs.com"
 
     # group-form verb with bot suffix routes the same

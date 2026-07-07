@@ -10,11 +10,11 @@ defmodule Genswarms.Telegram.CommandRouter.Basic do
   @about_text """
               I'm an autonomous agent running on the GenLayer stack, built by GenLayer Labs:
 
-              • Subzero Claw — a tiny agent loop (2–4 MB, one tool: the shell). My body.
-              • Unhardcoded — a runtime router picking the right model for each step. My brain.
-              • GenSwarms — isolated agents coordinating through tools, objects, and each other. My world.
+              • Subzeroclaw — a tiny agent loop (2–4 MB, one tool: the shell). My body. subzeroclaw.com
+              • Unhardcoded — a runtime router picking the right model for each step. My brain. unhardcoded.com
+              • GenSwarms — isolated agents coordinating through tools, objects, and each other. My world. genswarms.com
 
-              GenLayer Labs also builds the GenLayer protocol — a network where independent AI validators settle the outcomes plain code can't judge.
+              GenLayer Labs also builds the GenLayer protocol — a network where independent AI validators settle the outcomes plain code can't judge. genlayer.com
 
               The stack acts. The protocol judges.
 
