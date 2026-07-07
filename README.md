@@ -102,6 +102,50 @@ Normal CI should use `Client.Fake`. Live Telegram smoke tests should be explicit
 release checks with disposable credentials, because `getUpdates` is single-consumer
 per bot token.
 
+## Poller health
+
+Ingress state carries two extra fields for whoever operates the poll loop:
+`last_poll_ok_ms` (timestamp of the last poll that finished without error)
+and `conflict_count` (bumped only on a `getUpdates` 409, never on other poll
+failures). Both surface in `{"action":"status"}` alongside the existing
+`poll_failures`.
+
+A host can also inject `poll_health_sink` — a 1-arity fun in ingress config,
+called after every poll result (success and failure alike) with
+`%{last_poll_ok_ms:, conflict_count:, poll_failures:, at_ms:}`. A
+raising/throwing sink is caught and never breaks the poll loop. Because it's
+a function value, this seam is Elixir-config only — there is no JSON IR
+shape for it.
+
+`Genswarms.Telegram.Dashboard.poller_health_block/1` turns that same shape
+(minus `at_ms`) into a pure machine block, additive to `dashboard_extension/1`
+(the host feeds it the sink's map; `nil` — no poller configured — returns
+`%{}`):
+
+```elixir
+%{
+  "telegram_poller" => %{
+    "v" => 1,
+    "last_poll_ok_ms" => 1780982400000,
+    "conflict_count" => 0,
+    "poll_failures" => 0,
+    "health_rules" => [...]
+  }
+}
+```
+
+The two shipped rules: `poller_deaf` (warn — no successful poll in over 2
+minutes, only once a first success has happened) and `poll_conflict` (warn —
+`conflict_count` increased since the last observation). Conflicts matter
+because `getUpdates` is single-consumer per bot token — a 409 means a second
+poller is fighting over the same token, which silently drops updates for
+whichever loses the race.
+
+**These rules are inert today.** Nothing in this repo, or anywhere yet,
+evaluates `health_rules` — there is no observer that implements the grammar.
+Until one is wired up, `telegram_poller.health_rules` is just data returned
+alongside the numbers.
+
 ## Security Model
 
 Agents do not choose Telegram targets. Sender binds an opaque slot to a
