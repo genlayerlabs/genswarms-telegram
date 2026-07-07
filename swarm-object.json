@@ -55,7 +55,11 @@
       },
       "poll_interval_ms": { "type": "integer", "default": 1500, "x-mutable": true },
       "poll_timeout_s": { "type": "integer", "default": 25, "x-mutable": true },
-      "allowed_updates": { "type": "array", "x-mutable": true, "description": "Telegram update types requested from getUpdates." }
+      "allowed_updates": { "type": "array", "x-mutable": true, "description": "Telegram update types requested from getUpdates." },
+      "poll_health_sink": {
+        "default": null,
+        "description": "Optional 1-arity fun invoked after each poll result fold with %{last_poll_ok_ms:, conflict_count:, poll_failures:, at_ms:} (programmatic config only — never wire-settable, hence no JSON type). Wrapped total: a raising sink never breaks the poll loop."
+      }
     }
   }
 }

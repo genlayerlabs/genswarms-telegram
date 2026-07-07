@@ -1146,6 +1146,148 @@ defmodule Genswarms.Telegram.ObjectsTest do
     assert Fake.calls(fake) == []
   end
 
+  test "ingress poll success stamps last_poll_ok_ms monotonically, leaves conflict_count alone",
+       %{
+         fake: fake
+       } do
+    {:ok, state} =
+      Ingress.init(%{
+        bot_token: "token",
+        client: Fake,
+        client_opts: [fake: fake],
+        poll_enabled: false
+      })
+
+    refute state.last_poll_ok_ms
+    assert state.conflict_count == 0
+
+    {:noreply, state} = Ingress.handle_info({:telegram_poll_result, {:ok, [], 1}}, state)
+
+    assert is_integer(state.last_poll_ok_ms)
+    assert state.conflict_count == 0
+    first_ms = state.last_poll_ok_ms
+
+    {:noreply, state} = Ingress.handle_info({:telegram_poll_result, {:ok, [], 1}}, state)
+
+    assert is_integer(state.last_poll_ok_ms)
+    assert state.last_poll_ok_ms >= first_ms
+    assert state.conflict_count == 0
+  end
+
+  test "ingress poll 409 bumps conflict_count without touching last_poll_ok_ms", %{fake: fake} do
+    {:ok, state} =
+      Ingress.init(%{
+        bot_token: "token",
+        client: Fake,
+        client_opts: [fake: fake],
+        poll_enabled: false
+      })
+
+    {:noreply, state} = Ingress.handle_info({:telegram_poll_result, {:ok, [], 1}}, state)
+    ok_ms = state.last_poll_ok_ms
+
+    {{:noreply, state}, _log} =
+      ExUnit.CaptureLog.with_log(fn ->
+        Ingress.handle_info(
+          {:telegram_poll_result,
+           {:error, {:failed, 409, "Conflict: terminated by other getUpdates request"}}},
+          state
+        )
+      end)
+
+    assert state.conflict_count == 1
+    assert state.last_poll_ok_ms == ok_ms
+  end
+
+  test "ingress poll non-409 error does not bump conflict_count", %{fake: fake} do
+    {:ok, state} =
+      Ingress.init(%{
+        bot_token: "token",
+        client: Fake,
+        client_opts: [fake: fake],
+        poll_enabled: false
+      })
+
+    {{:noreply, state}, _log} =
+      ExUnit.CaptureLog.with_log(fn ->
+        Ingress.handle_info(
+          {:telegram_poll_result, {:error, {:failed, 500, "Internal Server Error"}}},
+          state
+        )
+      end)
+
+    assert state.conflict_count == 0
+    assert state.poll_failures == 1
+  end
+
+  test "poll_health_sink receives the health map after each poll result, and a raising sink is total",
+       %{fake: fake} do
+    test_pid = self()
+
+    {:ok, state} =
+      Ingress.init(%{
+        bot_token: "token",
+        client: Fake,
+        client_opts: [fake: fake],
+        poll_enabled: false,
+        poll_health_sink: fn m -> send(test_pid, {:sink, m}) end
+      })
+
+    {:noreply, state} = Ingress.handle_info({:telegram_poll_result, {:ok, [], 1}}, state)
+
+    assert_receive {:sink,
+                    %{
+                      last_poll_ok_ms: last_poll_ok_ms,
+                      conflict_count: 0,
+                      poll_failures: 0,
+                      at_ms: at_ms
+                    }}
+
+    assert is_integer(last_poll_ok_ms)
+    assert is_integer(at_ms)
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      Ingress.handle_info(
+        {:telegram_poll_result, {:error, {:failed, 409, "Conflict: terminated"}}},
+        state
+      )
+    end)
+
+    assert_receive {:sink, %{conflict_count: 1, poll_failures: 1}}
+
+    {:ok, raising_state} =
+      Ingress.init(%{
+        bot_token: "token2",
+        client: Fake,
+        client_opts: [fake: fake],
+        poll_enabled: false,
+        poll_health_sink: fn _m -> raise "boom" end
+      })
+
+    assert {:noreply, _state} =
+             Ingress.handle_info({:telegram_poll_result, {:ok, [], 1}}, raising_state)
+  end
+
+  test "ingress status action reports poll health fields", %{fake: fake} do
+    {:ok, state} =
+      Ingress.init(%{
+        bot_token: "token",
+        client: Fake,
+        client_opts: [fake: fake],
+        poll_enabled: false
+      })
+
+    {:noreply, state} = Ingress.handle_info({:telegram_poll_result, {:ok, [], 1}}, state)
+
+    {:reply, body, _state} = Ingress.handle_message(:test, %{"action" => "status"}, state)
+    decoded = Jason.decode!(body)
+
+    assert decoded["ok"] == true
+    assert is_integer(decoded["last_poll_ok_ms"])
+    assert decoded["conflict_count"] == 0
+    assert decoded["poll_failures"] == 0
+  end
+
   test "default memory policy does not persist conversation memories", %{fake: fake} do
     parent = self()
 

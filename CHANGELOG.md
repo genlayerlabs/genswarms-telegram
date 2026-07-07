@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Ingress poller health: `last_poll_ok_ms` / `conflict_count` state (409 replies
+  from `getUpdates` bump the latter), an injectable `poll_health_sink` config
+  hook (total against a raising sink) fired after every poll result, the
+  `status` action reply now surfaces both plus `poll_failures`, and a new pure
+  `Genswarms.Telegram.Dashboard.poller_health_block/1` builder shipping the
+  `telegram_poller` machine block with `poller_deaf`/`poll_conflict`
+  `health_rules` — additive, `dashboard_extension/1`'s output is unchanged.
+
+## 0.4.0 - 2026-07-05
+
+### Added
+
+- `config_schema` (design §14.2.1) on the Ingress `swarm-object.json`, with
+  `x-secret`/`x-mutable` annotations, and a `bot_token_env` secret ref so the
+  swarm config never carries the literal bot token.
+
+_(Backfilled: this release shipped without a CHANGELOG entry at the time —
+see `git log 4da215b..538dd9e`.)_
+
+## 0.3.1 - 2026-07-03
+
+### Added
+
+- Optional `DeliveryEffects` observability hooks (`reply_suppressed`,
+  `progress_sent`, `reply_unresolvable`) for the hookless sender paths that
+  `after_delivery` cannot see.
+
+_(Backfilled: this release shipped without a CHANGELOG entry at the time —
+see `git log 744a183..4da215b`.)_
+
+## 0.3.0 - 2026-07-03
+
+### Added
+
+- `Genswarms.Telegram.Dashboard`: reference session shaping (labels, dm/group
+  kind, `transport_ref`) plus this package's `dashboard_extension/1`
+  implementation of the genswarms-dashboard extension contract (schema 1).
+
+_(Backfilled: this release shipped without a CHANGELOG entry at the time —
+see `git log 7f16d5b..744a183`.)_
+
 ## 0.2.1 - 2026-07-02
 
 ### Documentation

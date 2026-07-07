@@ -36,6 +36,30 @@ defmodule Genswarms.Telegram.Dashboard do
   @schema 1
   @max_table_rows 100
 
+  @poller_health_rules [
+    %{
+      "id" => "poller_deaf",
+      "severity" => "warn",
+      "card" => "telegram poller has not completed a successful getUpdates in over 2 minutes",
+      "where" => %{
+        "op" => "neq",
+        "lhs" => %{"path" => "last_poll_ok_ms"},
+        "rhs" => %{"lit" => nil}
+      },
+      "when" => %{
+        "op" => "gt",
+        "lhs" => %{"sub" => ["now", %{"path" => "last_poll_ok_ms"}]},
+        "rhs" => 120_000
+      }
+    },
+    %{
+      "id" => "poll_conflict",
+      "severity" => "warn",
+      "card" => "getUpdates 409 conflict — two pollers are fighting over this bot token",
+      "when" => %{"op" => "gt", "lhs" => %{"delta" => "conflict_count"}, "rhs" => 0}
+    }
+  ]
+
   # ── reference session shaping ────────────────────────────────────────────────
 
   @doc """
@@ -149,6 +173,34 @@ defmodule Genswarms.Telegram.Dashboard do
           ]
         }
       ]
+    }
+  end
+
+  @doc """
+  A separate PURE machine block for telegram ingress poller health — the host
+  composes this alongside `dashboard_extension/1`'s output (that function's
+  return shape is unchanged; this is additive, not folded into it, since the
+  host is the one that owns the injected poll-health state, not this module).
+
+  `health` is `%{last_poll_ok_ms:, conflict_count:, poll_failures:}` (as sent
+  to the `poll_health_sink` fun, minus `at_ms`) or `nil` when the host has no
+  poller / polling is disabled — in which case this returns `%{}`.
+  """
+  def poller_health_block(nil), do: %{}
+
+  def poller_health_block(%{
+        last_poll_ok_ms: last_poll_ok_ms,
+        conflict_count: conflict_count,
+        poll_failures: poll_failures
+      }) do
+    %{
+      "telegram_poller" => %{
+        "v" => 1,
+        "last_poll_ok_ms" => last_poll_ok_ms,
+        "conflict_count" => conflict_count,
+        "poll_failures" => poll_failures,
+        "health_rules" => @poller_health_rules
+      }
     }
   end
 

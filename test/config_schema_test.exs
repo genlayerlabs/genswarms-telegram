@@ -10,7 +10,8 @@ defmodule Genswarms.Telegram.ConfigSchemaTest do
                    client_opts store context_store identity_sink
                    command_router session_runtime session_opts sender
                    binding_authority binding_sinks memory_policy poll_enabled
-                   poll_interval_ms poll_timeout_s allowed_updates)
+                   poll_interval_ms poll_timeout_s allowed_updates
+                   poll_health_sink)
 
   defp schema do
     Path.join(__DIR__, "../swarm-object.json")

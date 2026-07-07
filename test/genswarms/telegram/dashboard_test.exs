@@ -45,4 +45,69 @@ defmodule Genswarms.Telegram.DashboardTest do
     ext = Dashboard.dashboard_extension(sessions: [%{"session_id" => "tg:7:0", "label" => "x"}])
     assert ext["telegram"]["dms"] == 1
   end
+
+  test "poller_health_block: nil health (no poller / disabled) yields no block" do
+    assert Dashboard.poller_health_block(nil) == %{}
+  end
+
+  test "poller_health_block: exact wire shape + both health_rules, byte-exact (wire contract)" do
+    health = %{last_poll_ok_ms: 1_700_000_000_000, conflict_count: 2, poll_failures: 0}
+
+    assert Dashboard.poller_health_block(health) == %{
+             "telegram_poller" => %{
+               "v" => 1,
+               "last_poll_ok_ms" => 1_700_000_000_000,
+               "conflict_count" => 2,
+               "poll_failures" => 0,
+               "health_rules" => [
+                 %{
+                   "id" => "poller_deaf",
+                   "severity" => "warn",
+                   "card" =>
+                     "telegram poller has not completed a successful getUpdates in over 2 minutes",
+                   "where" => %{
+                     "op" => "neq",
+                     "lhs" => %{"path" => "last_poll_ok_ms"},
+                     "rhs" => %{"lit" => nil}
+                   },
+                   "when" => %{
+                     "op" => "gt",
+                     "lhs" => %{"sub" => ["now", %{"path" => "last_poll_ok_ms"}]},
+                     "rhs" => 120_000
+                   }
+                 },
+                 %{
+                   "id" => "poll_conflict",
+                   "severity" => "warn",
+                   "card" =>
+                     "getUpdates 409 conflict — two pollers are fighting over this bot token",
+                   "when" => %{
+                     "op" => "gt",
+                     "lhs" => %{"delta" => "conflict_count"},
+                     "rhs" => 0
+                   }
+                 }
+               ]
+             }
+           }
+
+    ids = get_in(Dashboard.poller_health_block(health), ["telegram_poller", "health_rules"])
+    assert Enum.map(ids, & &1["id"]) == ["poller_deaf", "poll_conflict"]
+  end
+
+  test "poller_health_block with nil last_poll_ok_ms" do
+    health = %{last_poll_ok_ms: nil, conflict_count: 0, poll_failures: 3}
+    block = Dashboard.poller_health_block(health)
+    assert block["telegram_poller"]["last_poll_ok_ms"] == nil
+    assert block["telegram_poller"]["poll_failures"] == 3
+  end
+
+  test "poller_health_block does not change dashboard_extension/1's output" do
+    sessions = [%{session_id: "tg:1:0", label: "u1"}]
+    ext_before = Dashboard.dashboard_extension(sessions: sessions)
+    _ = Dashboard.poller_health_block(%{last_poll_ok_ms: 1, conflict_count: 0, poll_failures: 0})
+    ext_after = Dashboard.dashboard_extension(sessions: sessions)
+    assert ext_before == ext_after
+    refute Map.has_key?(ext_after, "telegram_poller")
+  end
 end

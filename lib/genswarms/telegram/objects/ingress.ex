@@ -45,6 +45,9 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       poll_timeout_s: Map.get(config, :poll_timeout_s, 25),
       poll_ref: nil,
       poll_failures: 0,
+      last_poll_ok_ms: nil,
+      conflict_count: 0,
+      poll_health_sink: Map.get(config, :poll_health_sink),
       allowed_updates:
         Map.get(config, :allowed_updates, [
           "message",
@@ -110,15 +113,32 @@ defmodule Genswarms.Telegram.Objects.Ingress do
           if is_integer(offset),
             do: Adapter.call(state.store, :write_offset, [state.bot_ref, offset])
 
-          failures = if status == :ok, do: 0, else: state.poll_failures + 1
-          {%{state | poll_failures: failures}, messages}
+          state =
+            if status == :ok do
+              %{
+                state
+                | poll_failures: 0,
+                  last_poll_ok_ms: System.system_time(:millisecond)
+              }
+            else
+              %{state | poll_failures: state.poll_failures + 1}
+            end
 
-        {:error, _reason} ->
+          {state, messages}
+
+        {:error, reason} ->
           failures = state.poll_failures + 1
           log_poll_error(failures, result)
-          {%{state | poll_failures: failures}, []}
+
+          conflict_count =
+            if match?({:failed, 409, _}, reason),
+              do: state.conflict_count + 1,
+              else: state.conflict_count
+
+          {%{state | poll_failures: failures, conflict_count: conflict_count}, []}
       end
 
+    notify_health_sink(state)
     schedule_poll(state)
 
     case messages do
@@ -142,7 +162,15 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   def handle_info(_msg, state), do: {:noreply, state}
 
   defp dispatch(%{"action" => "status"}, state) do
-    {:ok, %{ok: true, bot_ref: state.bot_ref, routed: length(state.routed)}, state}
+    {:ok,
+     %{
+       ok: true,
+       bot_ref: state.bot_ref,
+       routed: length(state.routed),
+       last_poll_ok_ms: state.last_poll_ok_ms,
+       conflict_count: state.conflict_count,
+       poll_failures: state.poll_failures
+     }, state}
   end
 
   defp dispatch(%{"action" => "set_commands"}, state) do
@@ -430,6 +458,31 @@ defmodule Genswarms.Telegram.Objects.Ingress do
 
   defp replace_result_with_error({:send_many, _messages, state}, reason),
     do: {:error, reason, state}
+
+  # Fires after EVERY poll result fold (success and error branches alike) so an
+  # injected observer sees a steady heartbeat, not just failure spikes. Total:
+  # a raising/throwing/exiting sink must never break the poll loop — the sink
+  # is host-supplied and this package has no way to vet it ahead of time.
+  defp notify_health_sink(%{poll_health_sink: nil}), do: :ok
+
+  defp notify_health_sink(state) do
+    health = %{
+      last_poll_ok_ms: state.last_poll_ok_ms,
+      conflict_count: state.conflict_count,
+      poll_failures: state.poll_failures,
+      at_ms: System.system_time(:millisecond)
+    }
+
+    try do
+      state.poll_health_sink.(health)
+    rescue
+      _ -> :ok
+    catch
+      _, _ -> :ok
+    end
+
+    :ok
+  end
 
   defp log_poll_error(failures, {:error, reason}) do
     Logger.warning("telegram ingress poll error (#{failures} in a row): #{inspect(reason)}")
