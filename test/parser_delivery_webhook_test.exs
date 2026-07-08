@@ -34,6 +34,8 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
 
     assert :ignore = Parser.parse_update(%{"edited_message" => update["message"]})
 
+    # message_thread_id without is_topic_message is a reply chain, not a topic —
+    # it must NOT fork the conversation id (see parser_group_thread_test.exs).
     channel_post = %{
       "channel_post" => %{
         "chat" => %{"id" => -100, "type" => "supergroup"},
@@ -45,7 +47,7 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
     assert {:ok,
             %{
               source: :channel_post,
-              conversation_id: "tg:-100:4",
+              conversation_id: "tg:-100:0",
               text: "captioned",
               chat_type: "supergroup"
             }} =
