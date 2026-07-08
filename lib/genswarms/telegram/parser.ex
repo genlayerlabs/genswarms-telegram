@@ -14,7 +14,7 @@ defmodule Genswarms.Telegram.Parser do
   def parse_update(%{"callback_query" => cb} = update) when is_map(cb) do
     with %{"id" => callback_id, "message" => %{"chat" => %{"id" => chat_id}} = message} <- cb do
       chat = Map.get(message, "chat", %{})
-      thread_id = Map.get(message, "message_thread_id", "0")
+      thread_id = session_thread_id(message)
 
       {:ok,
        %{
@@ -63,7 +63,7 @@ defmodule Genswarms.Telegram.Parser do
   def parse_update(_), do: :ignore
 
   defp parse_message(update, %{"chat" => %{"id" => chat_id} = chat} = message, source) do
-    thread_id = Map.get(message, "message_thread_id", "0")
+    thread_id = session_thread_id(message)
     {kind, text} = text_from_message(message)
 
     event =
@@ -88,6 +88,15 @@ defmodule Genswarms.Telegram.Parser do
   end
 
   defp parse_message(_update, _message, _source), do: :ignore
+
+  # message_thread_id names a real conversation ONLY for forum-topic messages;
+  # on any other group message it's just the reply-chain root id, and keying
+  # sessions on it forks one group chat into a session per reply chain.
+  defp session_thread_id(message) do
+    if Map.get(message, "is_topic_message", false),
+      do: Map.get(message, "message_thread_id", "0"),
+      else: "0"
+  end
 
   defp text_from_message(%{"text" => text}) when is_binary(text), do: {:text, text}
   defp text_from_message(%{"caption" => caption}) when is_binary(caption), do: {:text, caption}
