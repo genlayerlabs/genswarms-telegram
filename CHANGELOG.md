@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.4 - 2026-07-08
+
+### Fixed
+
+- Sender `flush_held` tolerates a non-ok send: the coalesce flush hard-matched
+  `{:ok, state} = do_send_text(...)` inside `handle_info`, so any future
+  error-shaped return would MatchError on a timer and kill the sender object
+  (dead slot claims, wiped mailbox — the same trap as the 2026-07-07 prod
+  crash-loop, one layer down). The result is now cased: ok stamps reply+sig as
+  before; anything else keeps the sender alive — a failed flush loses the held
+  tail, never the sender, and the failure stays in the delivery audit.
+
 ## 0.4.3 - 2026-07-07
 
 ### Added
