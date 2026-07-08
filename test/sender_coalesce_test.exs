@@ -143,4 +143,43 @@ defmodule Genswarms.Telegram.SenderCoalesceTest do
     assert state2.held == state.held
     assert state2.sent == state.sent
   end
+
+  test "a failing flush send loses the tail, never the sender" do
+    # The flush runs on a handle_info timer: if the Telegram call for the
+    # coalesced tail fails (blocked user, parse error, outage), the sender
+    # must record the failure and carry on — a raise here kills the object,
+    # wiping slot claims and the queued mailbox (the 2026-07-07 signature).
+    {:ok, fake} =
+      Genswarms.Telegram.Client.Fake.start_link([
+        {:ok, %{"message_id" => 1}},
+        {:error, {:failed, 403, "Forbidden: bot was blocked by the user"}}
+      ])
+
+    {:ok, state} =
+      Sender.init(%{
+        client: Genswarms.Telegram.Client.Fake,
+        client_opts: [fake: fake],
+        rate_per_sec: 1_000,
+        binding_authority: :telegram_ingress,
+        slot_prefix: "telegram_agent",
+        delivery_effects: {Effects, %{test_pid: self()}}
+      })
+
+    {:noreply, state} =
+      Sender.handle_message(
+        :telegram_ingress,
+        %{"action" => "bind_session", "slot" => "telegram_agent_0", "conversation_id" => @cid},
+        state
+      )
+
+    state = state |> inbound(1) |> agent_reply("answer") |> agent_reply("tail")
+    assert state.held[@cid].texts == ["tail"]
+
+    {:noreply, state} = Sender.handle_info({:flush_held, @cid}, state)
+
+    # tail popped (not retried), failure recorded in the delivery audit,
+    # sender state intact
+    assert state.held == %{}
+    assert [%{result: {:error, {:failed, 403, _}}} | _] = state.sent
+  end
 end

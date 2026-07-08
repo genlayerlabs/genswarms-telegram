@@ -3675,10 +3675,16 @@ defmodule Genswarms.Telegram.Objects.Sender do
         else
           state = clear_progress(cid, state)
 
-          {:ok, state} =
-            do_send_text(cid, text, %{}, state, %{origin: :reply, from: from, coalesced: true})
-
-          state |> stamp_reply(cid, :reply) |> stamp_sig(cid, text, :reply)
+          # do_send_text records chunk failures itself and returns {:ok, state}
+          # today — but this runs on a handle_info timer, where a non-ok return
+          # (any future error shape) would MatchError and kill the sender: dead
+          # slot claims, wiped mailbox (the 2026-07-07 crash-loop signature).
+          # A failed flush costs one coalesced tail, never the sender.
+          case do_send_text(cid, text, %{}, state, %{origin: :reply, from: from, coalesced: true}) do
+            {:ok, state} -> state |> stamp_reply(cid, :reply) |> stamp_sig(cid, text, :reply)
+            {:error, _reason, state} -> state
+            _other -> state
+          end
         end
     end
   end
