@@ -43,6 +43,9 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       poll_enabled: Map.get(config, :poll_enabled, false),
       poll_interval_ms: Map.get(config, :poll_interval_ms, 1_500),
       poll_timeout_s: Map.get(config, :poll_timeout_s, 25),
+      # backpressure: at most this many NEW conversations (each = one agent
+      # spawn) opened per poll; the rest stay queued in Telegram for next cycle
+      max_new_sessions_per_poll: Map.get(config, :max_new_sessions_per_poll, 8),
       poll_ref: nil,
       poll_failures: 0,
       last_poll_ok_ms: nil,
@@ -105,37 +108,26 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   def handle_info({:telegram_poll_result, result}, state) do
     state = demonitor_poll(state)
 
+    # The poll loop must be indestructible. Handling updates can spawn agents
+    # (add_agent), and under load that GenServer.call can time out — a :exit that
+    # unwinds the whole reduce. If it escaped here, `schedule_poll` below would
+    # never run and the ingress would stop polling Telegram entirely: a silent
+    # outage (observed in prod — the object survives via crash containment but
+    # the poll timer, which was about to be re-armed, is lost). Contain it,
+    # count it as a failure, and always re-arm.
     {state, messages} =
-      case result do
-        {:ok, updates, _next_offset} ->
-          {state, messages, offset, status} = process_polled_updates(updates, state)
-
-          if is_integer(offset),
-            do: Adapter.call(state.store, :write_offset, [state.bot_ref, offset])
-
-          state =
-            if status == :ok do
-              %{
-                state
-                | poll_failures: 0,
-                  last_poll_ok_ms: System.system_time(:millisecond)
-              }
-            else
-              %{state | poll_failures: state.poll_failures + 1}
-            end
-
-          {state, messages}
-
-        {:error, reason} ->
+      try do
+        handle_poll_result(result, state)
+      catch
+        kind, reason ->
           failures = state.poll_failures + 1
-          log_poll_error(failures, result)
 
-          conflict_count =
-            if match?({:failed, 409, _}, reason),
-              do: state.conflict_count + 1,
-              else: state.conflict_count
+          Logger.error(
+            "telegram ingress poll handling crashed (#{failures} in a row): " <>
+              "#{inspect(kind)} #{inspect(reason)}"
+          )
 
-          {%{state | poll_failures: failures, conflict_count: conflict_count}, []}
+          {%{state | poll_failures: failures}, []}
       end
 
     notify_health_sink(state)
@@ -406,6 +398,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
           conversation_id: event.conversation_id
         })
 
+      state = count_new_session(state, session)
       state = %{state | routed: [%{event: event, session: session} | state.routed]}
       {:ok, %{ok: true, routed: true, conversation_id: event.conversation_id}, state}
     else
@@ -413,26 +406,91 @@ defmodule Genswarms.Telegram.Objects.Ingress do
     end
   end
 
+  # Only a freshly-spawned session (a brand-new conversation) counts against the
+  # per-poll cap; reusing a warm pool slot is cheap and shouldn't be throttled.
+  defp count_new_session(state, session) do
+    if session_fresh?(session) do
+      Map.update(state, :new_sessions_this_poll, 1, &(&1 + 1))
+    else
+      state
+    end
+  end
+
+  defp session_fresh?(session) when is_map(session), do: Map.get(session, :fresh?, false) == true
+  defp session_fresh?(_), do: false
+
+  defp handle_poll_result({:ok, updates, _next_offset}, state) do
+    {state, messages, offset, status} = process_polled_updates(updates, state)
+
+    if is_integer(offset),
+      do: Adapter.call(state.store, :write_offset, [state.bot_ref, offset])
+
+    state =
+      if status == :ok do
+        %{state | poll_failures: 0, last_poll_ok_ms: System.system_time(:millisecond)}
+      else
+        %{state | poll_failures: state.poll_failures + 1}
+      end
+
+    {state, messages}
+  end
+
+  defp handle_poll_result({:error, reason} = result, state) do
+    failures = state.poll_failures + 1
+    log_poll_error(failures, result)
+
+    conflict_count =
+      if match?({:failed, 409, _}, reason),
+        do: state.conflict_count + 1,
+        else: state.conflict_count
+
+    {%{state | poll_failures: failures, conflict_count: conflict_count}, []}
+  end
+
   defp process_polled_updates(updates, state) do
     start_offset = Adapter.call(state.store, :read_offset, [state.bot_ref])
+    cap = Map.get(state, :max_new_sessions_per_poll, 8)
+    state = Map.put(state, :new_sessions_this_poll, 0)
 
     Enum.reduce_while(updates, {state, [], start_offset, :ok}, fn update,
                                                                   {acc, messages, offset, _status} ->
       case handle_update(update, acc) do
         {:ok, _reply, next} ->
-          {:cont, {next, messages, next_update_offset(update, offset), :ok}}
+          cont_or_halt(next, {next, messages, next_update_offset(update, offset), :ok}, cap)
 
         {:send, to, payload, next} ->
-          {:cont,
-           {next, messages ++ [{:send, to, payload}], next_update_offset(update, offset), :ok}}
+          cont_or_halt(
+            next,
+            {next, messages ++ [{:send, to, payload}], next_update_offset(update, offset), :ok},
+            cap
+          )
 
         {:send_many, new_messages, next} ->
-          {:cont, {next, messages ++ new_messages, next_update_offset(update, offset), :ok}}
+          cont_or_halt(
+            next,
+            {next, messages ++ new_messages, next_update_offset(update, offset), :ok},
+            cap
+          )
 
         {:error, reason, next} ->
           {:halt, {next, messages, offset, {:error, reason}}}
       end
     end)
+  end
+
+  # Backpressure queue. Each brand-new conversation costs an agent spawn
+  # (add_agent), which is the expensive, saturating operation. Cap how many NEW
+  # sessions one poll opens; once the cap is hit, stop advancing the offset — the
+  # remaining updates stay queued in Telegram and come back on the next poll.
+  # A burst of hundreds thus drains a few per cycle instead of stampeding the
+  # SwarmManager, and once the load falls the backlog clears on its own. Updates
+  # for EXISTING sessions don't count against the cap (they're cheap).
+  defp cont_or_halt(state, acc, cap) do
+    if Map.get(state, :new_sessions_this_poll, 0) >= cap do
+      {:halt, acc}
+    else
+      {:cont, acc}
+    end
   end
 
   defp next_update_offset(%{"update_id" => update_id}, offset) when is_integer(update_id),
@@ -486,12 +544,6 @@ defmodule Genswarms.Telegram.Objects.Ingress do
 
   defp log_poll_error(failures, {:error, reason}) do
     Logger.warning("telegram ingress poll error (#{failures} in a row): #{inspect(reason)}")
-  end
-
-  defp log_poll_error(failures, {:ok, _updates, _next_offset} = result) do
-    Logger.warning(
-      "telegram ingress poll handling error (#{failures} in a row): #{inspect(result)}"
-    )
   end
 
   defp send_command_reply(event, text, state) do
