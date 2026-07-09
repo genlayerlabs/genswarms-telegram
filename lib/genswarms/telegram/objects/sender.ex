@@ -1369,6 +1369,11 @@ defmodule Genswarms.Telegram.Objects.Sender do
       end)
 
     result = logical_result(Enum.reverse(results))
+
+    # The host can only resolve a durable inbound cohort after Telegram has
+    # accepted the reply. Pass the validated (not merely requested) reply tag
+    # through the logical-delivery hook.
+    meta = Map.put(meta, :reply_to_message_id, reply_to)
     state = record_logical_delivery(state, cid, %{text: text}, result, meta)
 
     {:ok, state}
@@ -1687,6 +1692,8 @@ defmodule Genswarms.Telegram.Objects.Sender do
   end
 
   defp send_rich_payload(cid, rich_message, msg, state, meta) do
+    reply_to = validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state)
+
     payload =
       Delivery.build_send_rich_message(
         %{
@@ -1698,7 +1705,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
           message_effect_id: Map.get(msg, "message_effect_id"),
           allow_paid_broadcast: Map.get(msg, "allow_paid_broadcast")
         }
-        |> Map.merge(message_reply_attrs(cid, msg, state))
+        |> Map.merge(reply_attrs(reply_to, msg))
       )
 
     state = clear_progress(cid, state) |> throttle()
@@ -1707,7 +1714,12 @@ defmodule Genswarms.Telegram.Objects.Sender do
     state =
       state
       |> record_send(cid, payload, result, Map.get(meta, :from))
-      |> record_logical_delivery(cid, %{rich_message: rich_message}, result, meta)
+      |> record_logical_delivery(
+        cid,
+        %{rich_message: rich_message},
+        result,
+        Map.put(meta, :reply_to_message_id, reply_to)
+      )
 
     {:ok, state}
   end

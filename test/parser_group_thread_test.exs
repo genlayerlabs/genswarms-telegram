@@ -46,6 +46,13 @@ defmodule Genswarms.Telegram.ParserGroupThreadTest do
     assert event.conversation_id == "tg:-1003762806404:0"
   end
 
+  test "a host synthetic batch preserves its original message ids" do
+    update = Map.put(group_message(%{}), "pending_message_ids", [6000, 6001])
+
+    assert {:ok, event} = Parser.parse_update(update)
+    assert event.pending_message_ids == [6000, 6001]
+  end
+
   test "callback queries follow the same rule: reply-chain collapses, topic sticks" do
     callback = fn message_extra ->
       %{

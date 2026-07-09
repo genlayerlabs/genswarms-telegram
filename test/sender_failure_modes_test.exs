@@ -220,6 +220,48 @@ defmodule Genswarms.Telegram.SenderFailureModesTest do
     assert item.status == "dead_chat"
   end
 
+  test "logical delivery reports the validated reply tag to host effects" do
+    {:ok, fake} = Fake.start_link()
+
+    state =
+      Sender.new(%{
+        client: Fake,
+        client_opts: [fake: fake],
+        delivery_effects: {AuditEffects, %{test_pid: self()}},
+        binding_authority: :telegram_ingress,
+        slot_prefix: "telegram_agent",
+        rate_per_sec: 1_000
+      })
+
+    {:noreply, state} =
+      Sender.handle_message(
+        :telegram_ingress,
+        %{
+          "action" => "bind_session",
+          "slot" => "telegram_agent_0",
+          "conversation_id" => "tg:123:0"
+        },
+        state
+      )
+
+    {:noreply, state} =
+      Sender.handle_message(
+        :telegram_ingress,
+        %{"action" => "typing", "conversation_id" => "tg:123:0", "message_id" => 55},
+        state
+      )
+
+    {:noreply, _state} =
+      Sender.handle_message(
+        :telegram_agent_0,
+        %{"action" => "reply", "text" => "hello", "reply_to_message_id" => 55},
+        state
+      )
+
+    assert_receive {:after_delivery, %{conversation_id: "tg:123:0", text: "hello"}, %{ok: true},
+                    %{origin: :reply, reply_to_message_id: 55}}
+  end
+
   test "audit action, unauthorized batch, and slot reply guards do not call Telegram" do
     {:ok, fake} = Fake.start_link()
 

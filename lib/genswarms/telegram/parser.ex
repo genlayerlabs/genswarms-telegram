@@ -84,10 +84,23 @@ defmodule Genswarms.Telegram.Parser do
       }
       |> maybe_put(:replied_to, replied_to(message))
 
-    {:ok, event}
+    {:ok, maybe_pending_message_ids(event, update)}
   end
 
   defp parse_message(_update, _message, _source), do: :ignore
+
+  # Host-generated `inject_update` batches may represent several original
+  # Telegram messages as one synthetic transport event. Preserve their real
+  # ids as explicit metadata; normal Telegram updates never carry this field.
+  defp maybe_pending_message_ids(event, update) do
+    case Map.get(update, "pending_message_ids") do
+      ids when is_list(ids) ->
+        Map.put(event, :pending_message_ids, Enum.filter(ids, &is_integer/1))
+
+      _ ->
+        event
+    end
+  end
 
   # message_thread_id names a real conversation ONLY for forum-topic messages;
   # on any other group message it's just the reply-chain root id, and keying

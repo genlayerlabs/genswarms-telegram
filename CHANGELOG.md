@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.8 - 2026-07-09
+
+### Added
+
+- Synthetic ingress batches may carry `pending_message_ids`; the parser now
+  preserves these host-supplied original Telegram ids on the normalized event.
+  This lets a host correlate every member of a folded batch without changing
+  normal Telegram update handling.
+- Sender `after_delivery` metadata now includes the validated
+  `reply_to_message_id` for text and rich replies. Hosts can therefore resolve
+  durable inbound work only after Telegram accepts the reply, using the exact
+  tag that the sender actually used.
+
 ## 0.4.7 - 2026-07-09
 
 ### Added
