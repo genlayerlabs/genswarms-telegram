@@ -2690,7 +2690,18 @@ defmodule Genswarms.Telegram.Objects.Sender do
           {:ok, _} = ok ->
             ok
 
-          {:error, _reason} ->
+          {:error, reason} ->
+            # The downgrade used to be SILENT — an imageless delivery left zero
+            # trace of Telegram's rejection (undiagnosable in prod, 2026-07-09).
+            # Warn here and fire the optional photo_fallback host hook (log +
+            # metrics live host-side; absent hook = the old behavior).
+            Logger.warning(
+              "sender: send_photo failed, falling back to text: chat=#{inspect(Map.get(telegram_payload, :chat_id))} reason=#{inspect(reason)}"
+            )
+
+            if Adapter.exported?(state.delivery_effects, :photo_fallback, 2),
+              do: _ = Adapter.call(state.delivery_effects, :photo_fallback, [telegram_payload, reason])
+
             telegram_payload
             |> Map.delete(:photo)
             |> Map.delete(:caption)

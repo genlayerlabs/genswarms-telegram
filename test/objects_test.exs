@@ -273,7 +273,22 @@ defmodule Genswarms.Telegram.ObjectsTest do
     assert Fake.calls(fake) == []
   end
 
+  defmodule PhotoFallbackEffects do
+    def start, do: Agent.start(fn -> [] end, name: __MODULE__)
+    def calls, do: Agent.get(__MODULE__, &Enum.reverse/1)
+
+    # pass-through stubs for the hooks the sender calls unconditionally
+    def redact_outbound(text, _ctx, _opts), do: text
+    def before_send(_payload, _opts), do: :ok
+    def after_send(_payload, _response, _opts), do: :ok
+    def delivery_failed(_payload, _reason, _opts), do: :ok
+
+    def photo_fallback(payload, reason, _opts),
+      do: Agent.update(__MODULE__, &[{payload, reason} | &1])
+  end
+
   test "sender authorizes batch sends and falls back when photo delivery fails", %{fake: fake} do
+    {:ok, _} = PhotoFallbackEffects.start()
     Fake.push_response(fake, {:ok, %{"message_id" => 1}})
     Fake.push_response(fake, {:ok, %{"message_id" => 2}})
     Fake.push_response(fake, {:error, {:failed, 400, "bad photo"}})
@@ -285,7 +300,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
         client: Fake,
         client_opts: [fake: fake],
         batch_sources: [:cron],
-        send_sources: [:cron]
+        send_sources: [:cron],
+        delivery_effects: {PhotoFallbackEffects, %{}}
       })
 
     {:noreply, state} =
@@ -328,6 +344,11 @@ defmodule Genswarms.Telegram.ObjectsTest do
            ]
 
     assert Enum.at(calls, 3).payload.text == "photo text"
+
+    # The silent downgrade is no longer silent: the optional photo_fallback hook
+    # fires with the failing payload + Telegram's reason (host logs/metrics it).
+    assert [{payload, {:failed, 400, "bad photo"}}] = PhotoFallbackEffects.calls()
+    assert payload.photo == "https://example.com/a.png"
   end
 
   test "sender normalizes safe buttons and drops invalid buttons", %{fake: fake} do

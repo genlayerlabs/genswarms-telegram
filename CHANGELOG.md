@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.7 - 2026-07-09
+
+### Added
+
+- Sender: the sendPhoto→text fallback is no longer silent. A rejected
+  `send_photo` logs a warning with Telegram's reason and fires the new optional
+  `photo_fallback(payload, reason)` delivery-effects hook before downgrading to
+  the text send — hosts can log/metric the failure (previously an imageless
+  delivery left zero trace, making rejected campaign images undiagnosable).
+  Hosts without the hook see the old behavior plus the package-side warning.
+
 ## 0.4.4 - 2026-07-08
 
 ### Fixed
