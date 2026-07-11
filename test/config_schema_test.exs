@@ -9,7 +9,8 @@ defmodule Genswarms.Telegram.ConfigSchemaTest do
                    fail_open_without_username? inbound_effects client
                    client_opts store context_store identity_sink
                    command_router session_runtime session_opts sender
-                   binding_authority binding_sinks memory_policy poll_enabled
+                   binding_authority binding_sinks wake_sources inject_sources
+                   memory_policy poll_enabled
                    poll_interval_ms poll_timeout_s allowed_updates
                    poll_health_sink)
 
@@ -35,7 +36,9 @@ defmodule Genswarms.Telegram.ConfigSchemaTest do
     props = schema()["properties"]
     mutable = for {k, v} <- props, v["x-mutable"] == true, do: k
 
-    for trust_key <- ~w(binding_authority binding_sinks session_opts session_runtime store) do
+    for trust_key <-
+          ~w(binding_authority binding_sinks session_opts session_runtime store
+             wake_sources inject_sources) do
       refute trust_key in mutable, "#{trust_key} must not be x-mutable"
     end
   end

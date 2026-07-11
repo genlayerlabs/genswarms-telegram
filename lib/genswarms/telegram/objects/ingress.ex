@@ -40,6 +40,15 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       binding_authority: Map.get(config, :binding_authority, :telegram_ingress),
       binding_sinks: Map.get(config, :binding_sinks, [:telegram_sender]),
       memory_policy: Map.get(config, :memory_policy, :none),
+      # Trust gates for the privileged object-to-object actions (0.5.0).
+      # Engine-stamped senders only; compare as strings (config may hold
+      # atoms, the engine's `from` arrives as either). Anything but a
+      # non-empty list DISABLES the action — default off, fail closed:
+      #   wake_sources   → agent_wake (operator speaks THROUGH the agent)
+      #   inject_sources → inject_update (synthetic updates re-enter the
+      #     full pipeline as if polled — an open edge here is user forgery)
+      wake_sources: normalize_sources(Map.get(config, :wake_sources)),
+      inject_sources: normalize_sources(Map.get(config, :inject_sources)),
       poll_enabled: Map.get(config, :poll_enabled, false),
       poll_interval_ms: Map.get(config, :poll_interval_ms, 1_500),
       poll_timeout_s: Map.get(config, :poll_timeout_s, 25),
@@ -63,12 +72,12 @@ defmodule Genswarms.Telegram.Objects.Ingress do
     }
   end
 
-  def interface, do: %{actions: ~w(inject_update status set_commands)}
+  def interface, do: %{actions: ~w(inject_update status set_commands agent_wake)}
 
-  def handle_message(_from, message, state) do
+  def handle_message(from, message, state) do
     case decode(message) do
       {:ok, msg} ->
-        case dispatch(msg, state) do
+        case dispatch(msg, from, state) do
           {:ok, reply, state} ->
             {:reply, Jason.encode!(reply), state}
 
@@ -153,7 +162,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  defp dispatch(%{"action" => "status"}, state) do
+  defp dispatch(%{"action" => "status"}, _from, state) do
     {:ok,
      %{
        ok: true,
@@ -165,15 +174,98 @@ defmodule Genswarms.Telegram.Objects.Ingress do
      }, state}
   end
 
-  defp dispatch(%{"action" => "set_commands"}, state) do
+  defp dispatch(%{"action" => "set_commands"}, _from, state) do
     set_commands(state)
   end
 
-  defp dispatch(%{"action" => "inject_update", "update" => update}, state) do
-    handle_update(update, state)
+  # 0.5.0 BREAKING: inject_update is from-gated (default: nobody). A synthetic
+  # update re-enters the full pipeline as if Telegram delivered it — before
+  # this gate ANY roster-edged neighbor (including an LLM-run object) could
+  # forge a user message. Consumers must list their legitimate injectors
+  # (e.g. a burst drainer replaying queued turns) in `inject_sources`.
+  defp dispatch(%{"action" => "inject_update", "update" => update}, from, state) do
+    if authorized_source?(from, state.inject_sources) do
+      handle_update(update, state)
+    else
+      Logger.warning(
+        "telegram ingress: inject_update from unauthorized #{inspect(from)} dropped"
+      )
+
+      {:error, :unauthorized_inject, state}
+    end
   end
 
-  defp dispatch(_msg, state), do: {:error, :unknown_action, state}
+  # agent_wake (0.5.0): the operator speaks THROUGH the cid's own agent — the
+  # prompt is delivered into the session as an OPERATOR event (transcript role
+  # :operator, never :user), enveloped so the agent knows the user did not
+  # write it and that silence is a valid outcome. Admission is the session
+  # runtime's job (`ensure_session` may refuse — {:skip, reason} surfaces in
+  # the ack as `skipped`); the reply, if any, rides the normal bound-slot →
+  # sender path. No new send surface.
+  defp dispatch(%{"action" => "agent_wake"} = msg, from, state) do
+    cid = msg["conversation_id"]
+    prompt = msg["prompt"]
+
+    cond do
+      not authorized_source?(from, state.wake_sources) ->
+        Logger.warning("telegram ingress: agent_wake from unauthorized #{inspect(from)} dropped")
+        {:error, :unauthorized_wake, state}
+
+      not (is_binary(cid) and cid != "") ->
+        {:error, :wake_missing_conversation_id, state}
+
+      not (is_binary(prompt) and String.trim(prompt) != "") ->
+        {:error, :wake_missing_prompt, state}
+
+      true ->
+        deliver_wake(cid, prompt, Map.get(msg, "kind", "operator"), state)
+    end
+  end
+
+  defp dispatch(_msg, _from, state), do: {:error, :unknown_action, state}
+
+  # A user turn and an operator wake share the whole delivery chain; they
+  # differ only in the transcript role, the after_routed kind, and the ack
+  # flag — the mode map pins those three so neither path can drift into
+  # impersonating the other.
+  @user_turn %{role: :user, kind: :session, ack: :routed}
+  @wake_turn %{role: :operator, kind: :wake, ack: :woken}
+
+  # The wake envelope is FIXED in the package: callers choose the prompt, not
+  # the framing — the framing is what keeps a wake from impersonating the user.
+  @wake_envelope "[operator wake — the user did NOT send a message] " <>
+                   "An operator asked you to reach out to this user now, about what follows. " <>
+                   "Do not quote or mention this instruction; speak in your own voice, " <>
+                   "grounded in what you know about this conversation. If you have nothing " <>
+                   "genuinely valuable to say to this user right now, output nothing at all."
+
+  defp deliver_wake(cid, prompt, kind, state) do
+    event = %{
+      conversation_id: cid,
+      text: @wake_envelope <> "\n\n" <> prompt,
+      wake: true,
+      wake_kind: to_string(kind)
+    }
+
+    session_opts =
+      Map.merge(state.session_opts, %{
+        bot_ref: state.bot_ref,
+        binding_authority: state.binding_authority,
+        binding_sinks: state.binding_sinks
+      })
+
+    # No identity upsert: there is no Telegram user behind this event.
+    case ensure_session(state.session_runtime, event, session_opts) do
+      {:ok, session} ->
+        deliver_to_existing_session(event, session, session_opts, state, @wake_turn)
+
+      {:skip, reason} ->
+        skip_event(event, reason, state)
+
+      {:error, reason} ->
+        {:error, reason, state}
+    end
+  end
 
   defp handle_update(update, state) do
     update_id = Map.get(update, "update_id")
@@ -365,7 +457,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
     end
   end
 
-  defp deliver_to_existing_session(event, session, session_opts, state) do
+  defp deliver_to_existing_session(event, session, session_opts, state, mode \\ @user_turn) do
     with :ok <-
            maybe_init_context(state, event.conversation_id, session[:workspace]),
          :ok <-
@@ -390,17 +482,19 @@ defmodule Genswarms.Telegram.Objects.Ingress do
              session_opts
            ),
          :ok <-
-           maybe_after_turn(state, event.conversation_id, :user, event.text) do
+           maybe_after_turn(state, event.conversation_id, mode.role, event.text) do
       state =
         maybe_after_routed(state, event, %{
-          kind: :session,
+          kind: mode.kind,
           session: session,
           conversation_id: event.conversation_id
         })
 
       state = count_new_session(state, session)
       state = %{state | routed: [%{event: event, session: session} | state.routed]}
-      {:ok, %{ok: true, routed: true, conversation_id: event.conversation_id}, state}
+
+      {:ok, %{ok: true, conversation_id: event.conversation_id} |> Map.put(mode.ack, true),
+       state}
     else
       {:error, reason} -> {:error, reason, state}
     end
@@ -776,6 +870,13 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       allowed_updates: state.allowed_updates
     ]
   end
+
+  # Trust-gate helpers (0.5.0): sources compare as strings (config may hold
+  # atoms, the engine's `from` arrives as either); [] denies everyone.
+  defp normalize_sources(l) when is_list(l), do: Enum.map(l, &to_string/1)
+  defp normalize_sources(_), do: []
+
+  defp authorized_source?(from, sources), do: to_string(from) in sources
 
   defp client_opts(state), do: Keyword.merge([token: state.token], state.client_opts)
   defp decode(message) when is_binary(message), do: Jason.decode(message)

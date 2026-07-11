@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.5.0 - 2026-07-11
+
+### Added
+
+- **`agent_wake`** (privileged ingress action, spec 2026-07-08 Lane B): an
+  operator speaks THROUGH a conversation's own agent.
+  `{"action":"agent_wake","conversation_id":…,"prompt":…,"kind":…}` — gated
+  by the new `wake_sources` config (engine-stamped senders; default `[]` =
+  disabled). The prompt is delivered into the session via the existing
+  delivery chain as an OPERATOR event: transcript role `:operator` (never
+  `:user`), wrapped in a FIXED package envelope ("the user did NOT send a
+  message … if you have nothing genuinely valuable to say, output nothing
+  at all") — callers choose the prompt, never the framing. Admission stays
+  the session runtime's: an `ensure_session` refusal (`{:skip, reason}`)
+  surfaces in the ack as `skipped`; a delivered wake acks `woken` (never
+  `routed`). The reply, if any, rides the normal bound-slot → sender path —
+  no new send surface. `after_routed` sees `kind: :wake`.
+
+### Changed (BREAKING)
+
+- **`inject_update` is now from-gated** by the new `inject_sources` config
+  (default `[]` = disabled). A synthetic update re-enters the full pipeline
+  as if Telegram delivered it — before this gate ANY neighbor with an edge
+  to the ingress (including an LLM-run object) could forge a user message;
+  the edge added for wake must not silently keep that surface open.
+  Consumers must list their legitimate injectors explicitly (e.g. a burst
+  drainer replaying queued turns: `inject_sources: [:proactive]`).
+- `config_schema` gains `wake_sources` + `inject_sources` (trust surface,
+  never `x-mutable`); `interface/0` advertises `agent_wake`.
+
 ## 0.4.8 - 2026-07-09
 
 ### Added
