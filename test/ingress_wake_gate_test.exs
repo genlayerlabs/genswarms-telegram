@@ -65,6 +65,38 @@ defmodule Genswarms.Telegram.Objects.IngressWakeGateTest do
     def teardown_session(_s, _r, _o), do: :ok
   end
 
+  # A transcript-owning runtime (wingston-shaped): prefers deliver_turn/3 and
+  # sees the WHOLE turn map — the role must arrive there.
+  defmodule TurnRuntime do
+    @behaviour Genswarms.Telegram.SessionRuntime
+    @impl true
+    def ensure_session(cid, _opts),
+      do: {:ok, %{slot: :turn_slot, conversation_id: cid, workspace: "/tmp/wake", fresh?: false}}
+
+    @impl true
+    def bind_session(_s, _c, _sinks, _o), do: :ok
+
+    @impl true
+    def deliver_turn(_session, turn, _opts) do
+      send(:wake_gate_test_sink, {:turn, turn})
+      :ok
+    end
+
+    @impl true
+    def deliver_to_session(_s, _t, _o), do: :ok
+    @impl true
+    def teardown_session(_s, _r, _o), do: :ok
+  end
+
+  # Reports every on_skipped — the hosts' redelivery seam a refused wake must
+  # never reach (wingston queues skipped USER turns and re-injects them later).
+  defmodule SkipSpyEffects do
+    def on_skipped(event, reason, _meta, effects_state) do
+      send(:wake_gate_test_sink, {:on_skipped, Map.get(event, :conversation_id), reason})
+      {:ok, effects_state}
+    end
+  end
+
   # Captures the transcript role after_turn records.
   defmodule CapturingContext do
     def init_session(_bot_ref, _cid, _meta), do: :ok
@@ -163,6 +195,64 @@ defmodule Genswarms.Telegram.Objects.IngressWakeGateTest do
     assert reply["ok"] == true
     assert reply["skipped"] == "pool_full"
     refute Map.has_key?(reply, "woken")
+  end
+
+  test "a REFUSED wake never reaches on_skipped (the hosts' requeue seam — a queued wake would replay as a forged user update)",
+       %{fake: fake} do
+    state =
+      ingress(fake, %{
+        wake_sources: [:commands],
+        session_runtime: RefusingRuntime,
+        inbound_effects: SkipSpyEffects
+      })
+
+    reply = reply_of(Ingress.handle_message(:commands, wake_msg(), state))
+    assert reply["skipped"] == "pool_full"
+    refute_receive {:on_skipped, _, _}, 50
+
+    # ...while the SAME refusal on a USER turn still reaches the hook (the
+    # redelivery seam lives — only wakes stay out of it).
+    state2 =
+      ingress(fake, %{
+        inject_sources: [:tester],
+        session_runtime: RefusingRuntime,
+        inbound_effects: SkipSpyEffects
+      })
+
+    _ = Ingress.handle_message(:tester, inject_msg(text_update(9, 9)), state2)
+    assert_receive {:on_skipped, "tg:9:0", :pool_full}
+  end
+
+  test "the delivered TURN carries role :operator for wakes and :user for user turns (transcript-owning runtimes read it)",
+       %{fake: fake} do
+    state = ingress(fake, %{wake_sources: [:commands], session_runtime: TurnRuntime})
+
+    assert %{"woken" => true} = reply_of(Ingress.handle_message(:commands, wake_msg(), state))
+    assert_receive {:turn, %{role: :operator, conversation_id: "tg:42:0", text: text}}
+    assert text =~ "the user did NOT send a message"
+
+    # a normal user turn through the same runtime carries :user
+    state2 = ingress(fake, %{inject_sources: [:tester], session_runtime: TurnRuntime})
+    update = text_update(9, 9)
+    _ = Ingress.handle_message(:tester, inject_msg(update), state2)
+    assert_receive {:turn, %{role: :user, text: "replayed turn"}}
+  end
+
+  test "a malformed kind (map/number) falls back to the default label instead of crashing", %{
+    fake: fake
+  } do
+    state = ingress(fake, %{wake_sources: [:commands], session_runtime: TurnRuntime})
+
+    msg =
+      Jason.encode!(%{
+        action: "agent_wake",
+        conversation_id: "tg:42:0",
+        prompt: "hi",
+        kind: %{"weird" => true}
+      })
+
+    assert %{"woken" => true} = reply_of(Ingress.handle_message(:commands, msg, state))
+    assert_receive {:turn, %{event: %{wake_kind: "operator"}}}
   end
 
   test "missing/blank cid or prompt are refused before touching the session", %{fake: fake} do

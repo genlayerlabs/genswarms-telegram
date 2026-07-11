@@ -218,7 +218,16 @@ defmodule Genswarms.Telegram.Objects.Ingress do
         {:error, :wake_missing_prompt, state}
 
       true ->
-        deliver_wake(cid, prompt, Map.get(msg, "kind", "operator"), state)
+        deliver_wake(cid, prompt, wake_kind(msg), state)
+    end
+  end
+
+  # Anything but a non-empty string (a map, a number) is a caller bug — fall
+  # back to the default label rather than crash the ingress on to_string/1.
+  defp wake_kind(msg) do
+    case Map.get(msg, "kind") do
+      k when is_binary(k) and k != "" -> k
+      _ -> "operator"
     end
   end
 
@@ -244,7 +253,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       conversation_id: cid,
       text: @wake_envelope <> "\n\n" <> prompt,
       wake: true,
-      wake_kind: to_string(kind)
+      wake_kind: kind
     }
 
     session_opts =
@@ -260,7 +269,12 @@ defmodule Genswarms.Telegram.Objects.Ingress do
         deliver_to_existing_session(event, session, session_opts, state, @wake_turn)
 
       {:skip, reason} ->
-        skip_event(event, reason, state)
+        # Refusal-first, WITHOUT the on_skipped inbound effect: that hook is
+        # the hosts' redelivery seam (skipped USER turns may be queued by a
+        # drainer that re-injects them via inject_update) — a queued wake
+        # would replay operator text as a forged user update later. A refused
+        # wake is simply refused; the caller reads `skipped` and decides.
+        {:ok, %{ok: true, skipped: to_string(reason), conversation_id: cid}, state}
 
       {:error, reason} ->
         {:error, reason, state}
@@ -473,11 +487,17 @@ defmodule Genswarms.Telegram.Objects.Ingress do
            deliver_to_runtime(
              state.session_runtime,
              session,
+             # `role` (0.5.0) rides the turn so runtimes that OWN a transcript
+             # can record it honestly — the context-store after_turn below is
+             # not enough (hosts running memory_policy :none never see it,
+             # and a transcript-owning deliver_turn appends its own rows).
+             # Absent/`:user` = the pre-0.5.0 contract; `:operator` = wake.
              %{
                conversation_id: event.conversation_id,
                text: event.text,
                event: event,
-               context: context
+               context: context,
+               role: mode.role
              },
              session_opts
            ),

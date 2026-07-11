@@ -17,6 +17,14 @@
   surfaces in the ack as `skipped`; a delivered wake acks `woken` (never
   `routed`). The reply, if any, rides the normal bound-slot → sender path —
   no new send surface. `after_routed` sees `kind: :wake`.
+  Review hardening (2026-07-11): the delivered TURN carries `role:`
+  (`:user` | `:operator`) so transcript-owning runtimes record wakes
+  honestly (the context-store `after_turn` hook alone is invisible to
+  hosts running `memory_policy: :none`); a REFUSED wake never reaches the
+  `on_skipped` inbound effect (that hook is the hosts' redelivery seam —
+  a queued wake would replay operator text as a forged user update
+  later); a malformed `kind` (map/number) falls back to `"operator"`
+  instead of crashing the ingress.
 
 ### Changed (BREAKING)
 
