@@ -658,6 +658,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
 
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -713,6 +715,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
 
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -739,6 +743,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
   test "ingress routes command router replies through the sender", %{fake: fake} do
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -800,6 +806,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
 
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -843,6 +851,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
   test "ingress acknowledges callback queries through the Telegram client", %{fake: fake} do
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -871,6 +881,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
   test "ingress ignores slash commands explicitly addressed to another bot", %{fake: fake} do
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -903,6 +915,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
 
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -932,6 +946,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
 
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -958,6 +974,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
 
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -1012,6 +1030,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
 
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -1067,6 +1087,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
 
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -1093,6 +1115,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
   test "ingress registers command menus through the command router", %{fake: fake} do
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -1118,6 +1142,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
   test "ingress poll errors log the inspected Telegram reason", %{fake: fake} do
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -1143,6 +1169,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
   test "ingress poll emits command replies as sender messages", %{fake: fake} do
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -1173,6 +1201,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
        } do
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -1198,6 +1228,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
   test "ingress poll 409 bumps conflict_count without touching last_poll_ok_ms", %{fake: fake} do
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -1223,6 +1255,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
   test "ingress poll non-409 error does not bump conflict_count", %{fake: fake} do
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -1247,6 +1281,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
 
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -1278,6 +1314,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
 
     {:ok, raising_state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token2",
         client: Fake,
         client_opts: [fake: fake],
@@ -1292,6 +1330,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
   test "ingress status action reports poll health fields", %{fake: fake} do
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -1323,6 +1363,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
 
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],
@@ -1359,6 +1401,8 @@ defmodule Genswarms.Telegram.ObjectsTest do
 
     {:ok, state} =
       Ingress.init(%{
+        # 0.5.0: inject_update is from-gated; these tests inject as :test
+        inject_sources: [:test],
         bot_token: "token",
         client: Fake,
         client_opts: [fake: fake],

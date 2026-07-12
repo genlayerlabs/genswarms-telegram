@@ -40,6 +40,8 @@
       "sender": { "type": "string", "description": "Sender object name (default telegram_sender)." },
       "binding_authority": { "type": "string", "description": "Node authoritative for slot bindings (default telegram_ingress)." },
       "binding_sinks": { "type": "array", "description": "Nodes notified of slot bindings." },
+      "wake_sources": { "type": "array", "description": "Trust gate for agent_wake (0.5.0): engine-stamped senders allowed to wake a session's agent with an operator prompt. Default [] = disabled. Spawn admission is the session runtime's responsibility — a wake to a nonresident conversation may spawn an agent, outside the poll-loop's max_new_sessions_per_poll throttle (wakes don't ride polls); runtimes refuse via ensure_session {:skip, reason} when over their spawn budget (the reference Default runtime bounds live slots via pool_size)." },
+      "inject_sources": { "type": "array", "description": "Trust gate for inject_update (0.5.0, BREAKING — was ungated): engine-stamped senders allowed to inject synthetic updates into the full pipeline. Default [] = disabled; list legitimate injectors (e.g. a burst drainer) explicitly." },
       "memory_policy": {
         "type": "string",
         "enum": ["none", "dm_only", "all"],

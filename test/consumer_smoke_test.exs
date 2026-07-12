@@ -55,7 +55,9 @@ defmodule Genswarms.Telegram.ConsumerSmokeTest do
         session_runtime: NeutralRuntime,
         session_opts: %{parent: parent},
         binding_sinks: [:telegram_sender],
-        bot_username: "NeutralBot"
+        bot_username: "NeutralBot",
+        # 0.5.0: inject_update is from-gated; this smoke injects as :consumer
+        inject_sources: [:consumer]
       })
 
     {:ok, sender} =

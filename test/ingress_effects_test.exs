@@ -229,7 +229,9 @@ defmodule Genswarms.Telegram.IngressEffectsTest do
         binding_authority: :custom_ingress,
         binding_sinks: [:telegram_sender, :audit_sink],
         session_runtime: __MODULE__.Runtime,
-        session_opts: %{workspace_root: "/tmp/unused"}
+        session_opts: %{workspace_root: "/tmp/unused"},
+        # 0.5.0: inject_update is from-gated; this test injects as :tester
+        inject_sources: [:tester]
       })
 
     update = Map.put(text_update("hello runtime"), "update_id", 101)
@@ -265,7 +267,9 @@ defmodule Genswarms.Telegram.IngressEffectsTest do
        } do
     state = ingress(fake, :cont)
 
-    assert Ingress.interface() == %{actions: ["inject_update", "status", "set_commands"]}
+    assert Ingress.interface() == %{
+             actions: ["inject_update", "status", "set_commands", "agent_wake"]
+           }
     assert {:noreply, ^state} = Ingress.handle_message(:tester, "{bad", state)
 
     {:reply, body, state} = Ingress.handle_message(:tester, %{"action" => "status"}, state)
@@ -292,7 +296,9 @@ defmodule Genswarms.Telegram.IngressEffectsTest do
       bot_ref: "bot-effects-#{mode}",
       inbound_effects: {Effects, %{mode: mode, parent: self()}},
       fail_open_without_username?: true,
-      session_runtime: NoRuntime
+      session_runtime: NoRuntime,
+      # 0.5.0: inject_update is from-gated; these tests inject as :tester
+      inject_sources: [:tester]
     })
   end
 
