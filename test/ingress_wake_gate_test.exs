@@ -255,14 +255,22 @@ defmodule Genswarms.Telegram.Objects.IngressWakeGateTest do
     assert_receive {:turn, %{event: %{wake_kind: "operator"}}}
   end
 
-  test "missing/blank cid or prompt are refused before touching the session", %{fake: fake} do
+  test "missing/malformed cid or blank prompt are refused before touching the session", %{
+    fake: fake
+  } do
     state = ingress(fake, %{wake_sources: [:commands]})
 
     no_cid = Jason.encode!(%{action: "agent_wake", prompt: "hi"})
+    # review: a non-empty but malformed cid must be rejected too — it would
+    # bind a session to a garbage string and misderive the Telegram target.
+    bad_cid = Jason.encode!(%{action: "agent_wake", conversation_id: "tg:-100:bad", prompt: "hi"})
     blank = Jason.encode!(%{action: "agent_wake", conversation_id: "tg:1:0", prompt: "   "})
 
     assert reply_of(Ingress.handle_message(:commands, no_cid, state))["error"] =~
-             "wake_missing_conversation_id"
+             "wake_invalid_conversation_id"
+
+    assert reply_of(Ingress.handle_message(:commands, bad_cid, state))["error"] =~
+             "wake_invalid_conversation_id"
 
     assert reply_of(Ingress.handle_message(:commands, blank, state))["error"] =~
              "wake_missing_prompt"

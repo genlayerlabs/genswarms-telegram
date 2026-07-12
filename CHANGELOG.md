@@ -24,7 +24,13 @@
   `on_skipped` inbound effect (that hook is the hosts' redelivery seam —
   a queued wake would replay operator text as a forged user update
   later); a malformed `kind` (map/number) falls back to `"operator"`
-  instead of crashing the ingress.
+  instead of crashing the ingress. Second pass (2026-07-12): the wake cid
+  is FULLY validated (`ConversationId.valid?/1`) before touching the
+  session runtime — a malformed cid would bind a session to a garbage
+  string and misderive the Telegram target. Documented boundary: wake
+  spawn admission belongs to the session runtime (`ensure_session`
+  `{:skip, reason}`), NOT the poll-loop's `max_new_sessions_per_poll`
+  (wakes don't ride polls) — see the `wake_sources` schema description.
 
 ### Changed (BREAKING)
 

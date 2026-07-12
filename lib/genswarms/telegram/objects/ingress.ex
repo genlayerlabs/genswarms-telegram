@@ -211,8 +211,12 @@ defmodule Genswarms.Telegram.Objects.Ingress do
         Logger.warning("telegram ingress: agent_wake from unauthorized #{inspect(from)} dropped")
         {:error, :unauthorized_wake, state}
 
-      not (is_binary(cid) and cid != "") ->
-        {:error, :wake_missing_conversation_id, state}
+      # Full cid validation, not just non-empty (review): a malformed cid
+      # would bind a session to a garbage string, and the reply's derived
+      # Telegram target could land in a forum's root chat instead of the
+      # intended thread — reject before touching the session runtime.
+      not (is_binary(cid) and ConversationId.valid?(cid)) ->
+        {:error, :wake_invalid_conversation_id, state}
 
       not (is_binary(prompt) and String.trim(prompt) != "") ->
         {:error, :wake_missing_prompt, state}
@@ -256,12 +260,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       wake_kind: kind
     }
 
-    session_opts =
-      Map.merge(state.session_opts, %{
-        bot_ref: state.bot_ref,
-        binding_authority: state.binding_authority,
-        binding_sinks: state.binding_sinks
-      })
+    session_opts = delivery_session_opts(state)
 
     # No identity upsert: there is no Telegram user behind this event.
     case ensure_session(state.session_runtime, event, session_opts) do
@@ -446,13 +445,17 @@ defmodule Genswarms.Telegram.Objects.Ingress do
     end
   end
 
+  # The per-delivery session opts every path shares (user turns AND wakes).
+  defp delivery_session_opts(state) do
+    Map.merge(state.session_opts, %{
+      bot_ref: state.bot_ref,
+      binding_authority: state.binding_authority,
+      binding_sinks: state.binding_sinks
+    })
+  end
+
   defp deliver_to_session(event, state) do
-    session_opts =
-      Map.merge(state.session_opts, %{
-        bot_ref: state.bot_ref,
-        binding_authority: state.binding_authority,
-        binding_sinks: state.binding_sinks
-      })
+    session_opts = delivery_session_opts(state)
 
     with :ok <- maybe_upsert_identity(state, event) do
       case ensure_session(state.session_runtime, event, session_opts) do
