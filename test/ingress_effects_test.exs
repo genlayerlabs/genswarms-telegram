@@ -106,6 +106,32 @@ defmodule Genswarms.Telegram.IngressEffectsTest do
     end
   end
 
+  # The consumer-realistic shape: a TUPLE adapter {module, opts} whose scoped
+  # callback receives the router OPTS as the trailing arg (Adapter arity+1
+  # dispatch) — how a host wires its admin-chat ids into the router config.
+  defmodule TupleScopedRouter do
+    @behaviour Genswarms.Telegram.CommandRouter
+
+    @impl true
+    def handle_command(_event, _state, _opts), do: :ok
+
+    @impl true
+    def handle_callback(_event, _state, _opts), do: :ok
+
+    @impl true
+    def command_menu(_scope, _state, _opts), do: [%{command: "help", description: "Help"}]
+
+    @impl true
+    def command_menu_scoped(_state, opts) do
+      [
+        %{
+          scope: %{type: "chat", chat_id: Map.fetch!(opts, :admin_chat_id)},
+          commands: [%{command: "reach", description: "Operator"}]
+        }
+      ]
+    end
+  end
+
   defmodule BadScopedMenuRouter do
     @behaviour Genswarms.Telegram.CommandRouter
 
@@ -285,6 +311,24 @@ defmodule Genswarms.Telegram.IngressEffectsTest do
     {:reply, body, _state} = Ingress.handle_message(:tester, %{"action" => "set_commands"}, state)
 
     assert Jason.decode!(body)["error"] =~ "bad_scoped_menu_entry"
+  end
+
+  test "TUPLE-adapter routers get their opts in command_menu_scoped (the consumer wiring shape)",
+       %{fake: fake} do
+    state =
+      Ingress.new(%{
+        client: Fake,
+        client_opts: [fake: fake],
+        command_router: {TupleScopedRouter, %{admin_chat_id: -5_498_467_198}},
+        store: FileStore
+      })
+
+    {:reply, body, _state} = Ingress.handle_message(:tester, %{"action" => "set_commands"}, state)
+
+    assert %{"ok" => true, "command_menus" => %{"scoped" => 1}} = Jason.decode!(body)
+
+    scoped = Fake.calls(fake) |> List.last()
+    assert scoped.payload.scope == %{type: "chat", chat_id: -5_498_467_198}
   end
 
   test "routers without command_menu_scoped keep the pre-0.5.1 behavior (scoped: 0)", %{
