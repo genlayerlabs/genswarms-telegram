@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.1 - 2026-07-12
+
+### Added
+
+- Scoped command menus: `set_commands` now also registers per-chat and
+  per-chat-member menus via Telegram's narrow `BotCommandScope`s ("chat",
+  "chat_member") when the command router exports the new optional
+  `command_menu_scoped/1` callback — how a host shows privileged operator
+  verbs ONLY in the chat (or to the member) where its operators live.
+  Display-only: a menu never grants anything; hosts keep gating
+  server-side. Absent callback / `[]` = the pre-0.5.1 behavior; a
+  malformed entry fails the action loudly (an operator menu silently not
+  appearing is exactly the drift `set_commands` exists to prevent). The
+  ack's `command_menus` gains a `scoped` count.
+
+
 ## 0.5.0 - 2026-07-11
 
 ### Added

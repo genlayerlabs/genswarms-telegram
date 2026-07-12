@@ -76,6 +76,54 @@ defmodule Genswarms.Telegram.IngressEffectsTest do
     def handle_callback(_event, _state), do: :ok
   end
 
+  # 0.5.1 scoped menus: privileged verbs shown ONLY in the operators' chat
+  # (and one entry narrowed further, to a single member of it).
+  defmodule ScopedMenuRouter do
+    @behaviour Genswarms.Telegram.CommandRouter
+
+    @impl true
+    def handle_command(_event, _state), do: :ok
+
+    @impl true
+    def handle_callback(_event, _state), do: :ok
+
+    @impl true
+    def command_menu(:dm, _state), do: [%{command: "help", description: "Help"}]
+    def command_menu(:group, _state), do: [%{command: "help", description: "Help"}]
+
+    @impl true
+    def command_menu_scoped(_state) do
+      [
+        %{
+          scope: %{type: "chat", chat_id: -5_498_467_198},
+          commands: [%{command: "reach", description: "Operator DM to one user"}]
+        },
+        %{
+          scope: %{type: "chat_member", chat_id: -5_498_467_198, user_id: 5_681_202},
+          commands: [%{command: "wake", description: "Wake a user's agent"}]
+        }
+      ]
+    end
+  end
+
+  defmodule BadScopedMenuRouter do
+    @behaviour Genswarms.Telegram.CommandRouter
+
+    @impl true
+    def handle_command(_event, _state), do: :ok
+
+    @impl true
+    def handle_callback(_event, _state), do: :ok
+
+    @impl true
+    def command_menu(:dm, _state), do: []
+    def command_menu(:group, _state), do: []
+
+    @impl true
+    def command_menu_scoped(_state),
+      do: [%{scope: %{type: "everywhere"}, commands: []}]
+  end
+
   setup do
     dir =
       Path.join(System.tmp_dir!(), "gst-ingress-effects-#{System.unique_integer([:positive])}")
@@ -193,6 +241,67 @@ defmodule Genswarms.Telegram.IngressEffectsTest do
       Ingress.handle_message(:tester, %{"action" => "set_commands"}, unsupported_state)
 
     assert Jason.decode!(body)["command_menus"] == "unsupported"
+  end
+
+  test "scoped command menus (0.5.1): per-chat and per-member entries ride set_commands", %{
+    fake: fake
+  } do
+    state =
+      Ingress.new(%{
+        client: Fake,
+        client_opts: [fake: fake],
+        command_router: ScopedMenuRouter,
+        store: FileStore
+      })
+
+    {:reply, body, _state} = Ingress.handle_message(:tester, %{"action" => "set_commands"}, state)
+
+    assert %{"ok" => true, "command_menus" => %{"scoped" => 2}} = Jason.decode!(body)
+
+    [_dm, _group, chat, member] = Fake.calls(fake)
+    assert chat.method == :set_my_commands
+    assert chat.payload.scope == %{type: "chat", chat_id: -5_498_467_198}
+    assert Enum.map(chat.payload.commands, & &1.command) == ["reach"]
+
+    assert member.payload.scope == %{
+             type: "chat_member",
+             chat_id: -5_498_467_198,
+             user_id: 5_681_202
+           }
+
+    assert Enum.map(member.payload.commands, & &1.command) == ["wake"]
+  end
+
+  test "a malformed scoped entry fails set_commands LOUDLY (a missing operator menu is drift)",
+       %{fake: fake} do
+    state =
+      Ingress.new(%{
+        client: Fake,
+        client_opts: [fake: fake],
+        command_router: BadScopedMenuRouter,
+        store: FileStore
+      })
+
+    {:reply, body, _state} = Ingress.handle_message(:tester, %{"action" => "set_commands"}, state)
+
+    assert Jason.decode!(body)["error"] =~ "bad_scoped_menu_entry"
+  end
+
+  test "routers without command_menu_scoped keep the pre-0.5.1 behavior (scoped: 0)", %{
+    fake: fake
+  } do
+    state =
+      Ingress.new(%{
+        client: Fake,
+        client_opts: [fake: fake],
+        command_router: MenuRouter,
+        store: FileStore
+      })
+
+    {:reply, body, _state} = Ingress.handle_message(:tester, %{"action" => "set_commands"}, state)
+
+    assert %{"ok" => true, "command_menus" => %{"scoped" => 0}} = Jason.decode!(body)
+    assert length(Fake.calls(fake)) == 2
   end
 
   test "poll lifecycle ignores duplicate polls and accounts task crashes without writing offsets",
