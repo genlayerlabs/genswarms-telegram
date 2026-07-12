@@ -21,8 +21,19 @@ defmodule Genswarms.Telegram.CommandRouter do
   @callback command_menu(:dm | :group, map()) :: [map()]
   @callback command_menu(:dm | :group, map(), map()) :: [map()]
 
+  # Per-chat / per-chat-member menus (0.5.1): entries the ingress registers
+  # via Telegram's narrow BotCommandScopes on `set_commands` — how a host
+  # shows privileged verbs only where its operators live. Display-only; the
+  # host keeps gating server-side.
+  #
+  #     [%{scope: %{type: "chat" | "chat_member", chat_id: integer(),
+  #                 optional(:user_id) => integer()},
+  #        commands: [%{command: String.t(), description: String.t()}]}]
+  @callback command_menu_scoped(map()) :: [map()]
+
   @optional_callbacks handle_command: 3,
                       handle_callback: 3,
                       command_menu: 2,
-                      command_menu: 3
+                      command_menu: 3,
+                      command_menu_scoped: 1
 end

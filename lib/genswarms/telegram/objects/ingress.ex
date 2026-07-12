@@ -831,8 +831,9 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   defp set_commands(state) do
     if Adapter.exported?(state.command_router, :command_menu, 2) do
       with {:ok, dm} <- set_command_scope(state, :dm, "all_private_chats"),
-           {:ok, group} <- set_command_scope(state, :group, "all_group_chats") do
-        {:ok, %{ok: true, command_menus: %{dm: dm, group: group}}, state}
+           {:ok, group} <- set_command_scope(state, :group, "all_group_chats"),
+           {:ok, scoped} <- set_scoped_menus(state) do
+        {:ok, %{ok: true, command_menus: %{dm: dm, group: group, scoped: scoped}}, state}
       else
         {:error, reason} -> {:error, {:set_commands_failed, reason}, state}
       end
@@ -852,6 +853,45 @@ defmodule Genswarms.Telegram.Objects.Ingress do
     case Client.set_my_commands(state.client, payload, client_opts(state)) do
       {:ok, _response} -> {:ok, length(commands)}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Per-chat menus (0.5.1): Telegram's BotCommandScope narrows a menu to ONE
+  # chat ("chat", chat_id) or one member of it ("chat_member", chat_id +
+  # user_id) — how a host shows privileged verbs ONLY where its operators
+  # live. Display-only: a menu never grants anything; hosts keep gating
+  # server-side. Optional router callback:
+  #
+  #     command_menu_scoped(state) ::
+  #       [%{scope: %{type: "chat" | "chat_member", chat_id: integer(),
+  #                   optional(:user_id) => integer()},
+  #          commands: [%{command: _, description: _}]}]
+  #
+  # Absent callback / [] = the pre-0.5.1 behavior. A malformed entry fails
+  # the whole action loudly — an operator menu silently not appearing is
+  # exactly the drift set_commands exists to prevent.
+  defp set_scoped_menus(state) do
+    if Adapter.exported?(state.command_router, :command_menu_scoped, 1) do
+      entries = Adapter.call(state.command_router, :command_menu_scoped, [state])
+
+      Enum.reduce_while(List.wrap(entries), {:ok, 0}, fn entry, {:ok, count} ->
+        with %{scope: %{type: type, chat_id: chat_id} = scope, commands: commands}
+             when type in ["chat", "chat_member"] and is_integer(chat_id) and
+                    is_list(commands) <- entry,
+             {:ok, _} <-
+               Client.set_my_commands(
+                 state.client,
+                 %{commands: commands, scope: scope},
+                 client_opts(state)
+               ) do
+          {:cont, {:ok, count + 1}}
+        else
+          {:error, reason} -> {:halt, {:error, reason}}
+          bad -> {:halt, {:error, {:bad_scoped_menu_entry, bad}}}
+        end
+      end)
+    else
+      {:ok, 0}
     end
   end
 
