@@ -59,7 +59,8 @@ defmodule Genswarms.Telegram.CardEditorContractTest do
       span.("bot_command", %{}),
       %{"kind" => "anchor", "name" => "top"},
       span.("anchor_link", %{"anchor_name" => "top"}),
-      span.("reference_link", %{"name" => "ref1"})
+      span.("reference_link", %{"name" => "ref1"}),
+      span.("reference", %{"name" => "ref-inline"})
     ]
 
     %{
@@ -88,6 +89,8 @@ defmodule Genswarms.Telegram.CardEditorContractTest do
           "url" => "https://example.com/a.jpg", "caption" => "photo", "spoiler" => true},
         %{"kind" => "media", "media_type" => "video", "url" => "https://example.com/v.mp4"},
         %{"kind" => "media", "media_type" => "audio", "url" => "https://example.com/a.mp3"},
+        %{"kind" => "media", "media_type" => "animation", "url" => "https://example.com/a.mp4"},
+        %{"kind" => "media", "media_type" => "voice_note", "url" => "https://example.com/v.ogg"},
         %{"kind" => "collage",
           "items" => [
             %{"media_type" => "photo", "url" => "https://example.com/1.jpg"},
