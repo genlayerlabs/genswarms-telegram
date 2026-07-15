@@ -1,0 +1,198 @@
+[
+  {
+    "name": "block_paragraph",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<p>Plain text can stand alone.</p>"
+  },
+  {
+    "name": "block_heading",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<h2>Status</h2>"
+  },
+  {
+    "name": "block_list",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<ol><li>First step</li><li>Second step</li></ol>"
+  },
+  {
+    "name": "block_checklist",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<ul><li><input type=\"checkbox\" checked/>Draft answer</li><li><input type=\"checkbox\"/>Send final</li></ul>"
+  },
+  {
+    "name": "block_table",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<table><tr><th>Item</th><th>State</th></tr><tr><td>Plan</td><td>Ready</td></tr></table>"
+  },
+  {
+    "name": "block_quote",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<blockquote>Use the smallest clear answer.</blockquote>"
+  },
+  {
+    "name": "block_code",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<pre><code class=\"language-elixir\">IO.puts(&quot;ok&quot;)</code></pre>"
+  },
+  {
+    "name": "block_divider",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<p>Before</p>\n<hr/>\n<p>After</p>"
+  },
+  {
+    "name": "block_media",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<figure><img src=\"https://example.com/photo.jpg\"/><figcaption>A safe HTTPS image.</figcaption></figure>"
+  },
+  {
+    "name": "block_collage",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<tg-collage><img src=\"https://example.com/a.jpg\"/><img src=\"https://example.com/b.jpg\"/></tg-collage>"
+  },
+  {
+    "name": "block_slideshow",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<tg-slideshow><img src=\"https://example.com/slide-1.jpg\"/><video src=\"https://example.com/slide-2.mp4\"></video></tg-slideshow>"
+  },
+  {
+    "name": "block_references",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<tg-reference name=\"source-1\">Reference note</tg-reference>"
+  },
+  {
+    "name": "composed_summary",
+    "action": "send_card",
+    "kind": "composed_card",
+    "draft": false,
+    "html": "<h3>Acme Concierge</h3>\n<h2>Daily brief</h2>\n<p>Everything is <b>ready</b> for review.</p>\n<ul><li><input type=\"checkbox\" checked/>Inputs checked</li><li><input type=\"checkbox\"/>Final sent</li></ul>"
+  },
+  {
+    "name": "composed_analysis",
+    "action": "send_card",
+    "kind": "composed_card",
+    "draft": false,
+    "html": "<h3>trivia_quest</h3>\n<h4>Round summary</h4>\n<table><tr><th>Metric</th><th>Value</th></tr><tr><td>Questions</td><td>5</td></tr><tr><td>Score</td><td>4</td></tr></table>\n<blockquote>Answer the strongest clue first.<cite>example_bot</cite></blockquote>\n<footer><a href=\"https://example.com/rules\">Rules</a></footer>"
+  },
+  {
+    "name": "action_send_card",
+    "action": "send_card",
+    "kind": "action",
+    "draft": false,
+    "html": "<h3>Update</h3>\n<p>Here is the concise answer.</p>"
+  },
+  {
+    "name": "action_stream_card",
+    "action": "stream_card",
+    "kind": "action",
+    "draft": true,
+    "html": "<h3>Composing answer</h3>\n<tg-thinking>Checking the current context.</tg-thinking>\n<ul><li><input type=\"checkbox\" checked/>Read input</li><li><input type=\"checkbox\"/>Draft final</li></ul>"
+  },
+  {
+    "name": "action_edit_card",
+    "action": "edit_card",
+    "kind": "action",
+    "draft": false,
+    "html": "<h3>Updated answer</h3>\n<p>The message has been revised.</p>"
+  },
+  {
+    "name": "block_details",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<details><summary>What changed?</summary><p>Everything important.</p></details>"
+  },
+  {
+    "name": "block_blockquote_expandable",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<blockquote expandable>A long quotation that Telegram collapses until tapped.<cite>Source</cite></blockquote>"
+  },
+  {
+    "name": "block_pullquote",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<aside>Ship the smallest clear card.<cite>Ops</cite></aside>"
+  },
+  {
+    "name": "block_pre",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<pre><code>plain preformatted text</code></pre>"
+  },
+  {
+    "name": "block_footer",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<p>Body</p>\n<footer>Fine print lives here.</footer>"
+  },
+  {
+    "name": "block_math",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<tg-math-block>p = \\frac{yes}{yes + no}</tg-math-block>"
+  },
+  {
+    "name": "block_anchor",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<a name=\"summary\"></a>\n<p>Jump back to <a href=\"#summary\">the summary</a></p>"
+  },
+  {
+    "name": "block_time",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<tg-time unix=\"1800000000\" format=\"relative\">window closes</tg-time>"
+  },
+  {
+    "name": "block_map",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<tg-map lat=\"41.3874\" long=\"2.1686\" zoom=\"12\"/>"
+  },
+  {
+    "name": "block_thinking_draft",
+    "action": "stream_card",
+    "kind": "card_block",
+    "draft": true,
+    "html": "<tg-thinking>Checking market state...</tg-thinking>"
+  },
+  {
+    "name": "inline_span_sampler",
+    "action": "send_card",
+    "kind": "card_block",
+    "draft": false,
+    "html": "<p>Spans: <b>bold</b> <i>italic</i> <u>underline</u> <s>strike</s> <tg-spoiler>spoiler</tg-spoiler> <mark>mark</mark> <code>code</code> <sub>sub</sub><sup>sup</sup> <a href=\"https://example.com/\">link</a> <tg-emoji emoji-id=\"5368324170671202286\">⭐</tg-emoji> <tg-time unix=\"1800000000\">then</tg-time> @example <a href=\"tg://user?id=123\">Alice</a> <tg-math>x^2</tg-math> <a href=\"mailto:a@example.com\">a@example.com</a> <a href=\"tel:+34600000000\">+34600000000</a> markets USDC start</p>"
+  }
+]

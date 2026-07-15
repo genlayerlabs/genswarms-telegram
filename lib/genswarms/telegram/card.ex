@@ -300,6 +300,153 @@ defmodule Genswarms.Telegram.Card do
         quote_position: 12,
         quote_parse_mode: "HTML",
         text: "Replying to that exact phrase."
+      },
+      %{
+        name: "block_details",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{
+              "kind" => "details",
+              "summary" => "What changed?",
+              "blocks" => [%{"kind" => "paragraph", "text" => "Everything important."}]
+            }
+          ]
+        }
+      },
+      %{
+        name: "block_blockquote_expandable",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{
+              "kind" => "blockquote",
+              "expandable" => true,
+              "text" => "A long quotation that Telegram collapses until tapped.",
+              "credit" => "Source"
+            }
+          ]
+        }
+      },
+      %{
+        name: "block_pullquote",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{"kind" => "pullquote", "text" => "Ship the smallest clear card.", "credit" => "Ops"}
+          ]
+        }
+      },
+      %{
+        name: "block_pre",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [%{"kind" => "pre", "text" => "plain preformatted text"}]
+        }
+      },
+      %{
+        name: "block_footer",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{"kind" => "paragraph", "text" => "Body"},
+            %{"kind" => "footer", "text" => "Fine print lives here."}
+          ]
+        }
+      },
+      %{
+        name: "block_math",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{"kind" => "mathematical_expression", "expression" => "p = \\frac{yes}{yes + no}"}
+          ]
+        }
+      },
+      %{
+        name: "block_anchor",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{"kind" => "anchor", "name" => "summary"},
+            %{
+              "kind" => "paragraph",
+              "text" => [
+                "Jump back to ",
+                %{"kind" => "anchor_link", "text" => "the summary", "anchor_name" => "summary"}
+              ]
+            }
+          ]
+        }
+      },
+      %{
+        name: "block_time",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{"kind" => "time", "unix" => 1_800_000_000, "format" => "relative", "text" => "window closes"}
+          ]
+        }
+      },
+      %{
+        name: "block_map",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{"kind" => "map", "latitude" => 41.3874, "longitude" => 2.1686, "zoom" => 12}
+          ]
+        }
+      },
+      %{
+        name: "block_thinking_draft",
+        kind: "card_block",
+        action: "stream_card",
+        card: %{
+          "blocks" => [%{"kind" => "thinking", "text" => "Checking market state..."}]
+        }
+      },
+      %{
+        name: "inline_span_sampler",
+        kind: "card_block",
+        action: "send_card",
+        card: %{
+          "blocks" => [
+            %{
+              "kind" => "paragraph",
+              "text" => [
+                "Spans: ",
+                %{"kind" => "bold", "text" => "bold"}, " ",
+                %{"kind" => "italic", "text" => "italic"}, " ",
+                %{"kind" => "underline", "text" => "underline"}, " ",
+                %{"kind" => "strikethrough", "text" => "strike"}, " ",
+                %{"kind" => "spoiler", "text" => "spoiler"}, " ",
+                %{"kind" => "mark", "text" => "mark"}, " ",
+                %{"kind" => "code", "text" => "code"}, " ",
+                %{"kind" => "sub", "text" => "sub"}, %{"kind" => "sup", "text" => "sup"}, " ",
+                %{"kind" => "link", "text" => "link", "url" => "https://example.com/"}, " ",
+                %{"kind" => "custom_emoji", "text" => "⭐", "emoji_id" => "5368324170671202286"}, " ",
+                %{"kind" => "date_time", "text" => "then", "unix" => 1_800_000_000}, " ",
+                %{"kind" => "mention", "text" => "@example", "username" => "example"}, " ",
+                %{"kind" => "text_mention", "text" => "Alice", "user_id" => 123}, " ",
+                %{"kind" => "mathematical_expression", "expression" => "x^2"}, " ",
+                %{"kind" => "email_address", "email_address" => "a@example.com"}, " ",
+                %{"kind" => "phone_number", "phone_number" => "+34600000000"}, " ",
+                %{"kind" => "hashtag", "text" => "markets"}, " ",
+                %{"kind" => "cashtag", "text" => "USDC"}, " ",
+                %{"kind" => "bot_command", "text" => "start"}
+              ]
+            }
+          ]
+        }
       }
     ]
   end
