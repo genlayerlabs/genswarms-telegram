@@ -1,0 +1,126 @@
+{
+  "schema_version": "1",
+  "bot_api_version": "10.1",
+  "block_elements": [
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "p",
+    "ul",
+    "ol",
+    "li",
+    "table",
+    "caption",
+    "tr",
+    "th",
+    "td",
+    "details",
+    "summary",
+    "blockquote",
+    "cite",
+    "aside",
+    "pre",
+    "footer",
+    "hr",
+    "figure",
+    "figcaption",
+    "tg-math-block",
+    "tg-collage",
+    "tg-slideshow",
+    "tg-reference",
+    "tg-thinking",
+    "img",
+    "video",
+    "audio",
+    "input"
+  ],
+  "inline_elements": [
+    "b",
+    "i",
+    "u",
+    "s",
+    "mark",
+    "code",
+    "sub",
+    "sup",
+    "a",
+    "tg-spoiler",
+    "tg-emoji",
+    "tg-time",
+    "tg-math"
+  ],
+  "void_elements": [
+    "hr",
+    "img",
+    "input",
+    "tg-map"
+  ],
+  "attributes": {
+    "a": [
+      "href",
+      "name"
+    ],
+    "blockquote": [
+      "expandable"
+    ],
+    "code": [
+      "class"
+    ],
+    "details": [
+      "open"
+    ],
+    "img": [
+      "src",
+      "tg-spoiler"
+    ],
+    "video": [
+      "src",
+      "tg-spoiler"
+    ],
+    "audio": [
+      "src",
+      "tg-spoiler"
+    ],
+    "input": [
+      "type",
+      "checked"
+    ],
+    "ol": [
+      "reversed",
+      "start",
+      "type"
+    ],
+    "li": [
+      "value"
+    ],
+    "table": [
+      "bordered",
+      "striped"
+    ],
+    "tg-emoji": [
+      "emoji-id"
+    ],
+    "tg-map": [
+      "lat",
+      "long",
+      "zoom"
+    ],
+    "tg-reference": [
+      "name"
+    ],
+    "tg-time": [
+      "unix",
+      "format"
+    ]
+  },
+  "href_schemes": [
+    "http",
+    "https",
+    "tg",
+    "mailto",
+    "tel"
+  ]
+}
