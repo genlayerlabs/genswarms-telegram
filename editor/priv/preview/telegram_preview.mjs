@@ -208,7 +208,8 @@ export function renderPreviewHtml(html, { profile = "rich", loadMedia = false } 
     return `${TOKEN_DELIM}${tokens.length - 1}${TOKEN_DELIM}`;
   };
 
-  const src = String(html ?? "");
+  // Strip NUL bytes from input to prevent token substitution corruption
+  const src = String(html ?? "").replaceAll(" ", "");
   const aStack = [];
   let out = "";
   let last = 0;
@@ -292,4 +293,40 @@ export function renderPreviewHtml(html, { profile = "rich", loadMedia = false } 
   const escaped = escapeText(out);
   const tokenRe = new RegExp(`${TOKEN_DELIM}(\\d+)${TOKEN_DELIM}`, "g");
   return escaped.replace(tokenRe, (_m, i) => tokens[Number(i)]);
+}
+
+// ── Interactive replica ────────────────────────────────────────────────
+// Pure decision core (node-testable) + thin DOM glue.
+export function decideBehavior(target) {
+  const nav = target.closest?.(".preview-slide-nav");
+  const host = target.closest?.("[data-behavior]");
+  if (!host) return null;
+  const behavior = host.dataset.behavior;
+  if (behavior === "spoiler") return { type: "spoiler", toggleClass: "revealed", host };
+  if (behavior === "expandable") return { type: "expandable", toggleClass: "expanded", host };
+  if (behavior === "slideshow" && nav)
+    return { type: "slideshow", step: Number(nav.dataset.slide) || 1, host };
+  if (behavior === "anchor-jump")
+    return { type: "anchor-jump", target: `anchor-${target.dataset?.anchorTarget ?? host.dataset.anchorTarget ?? ""}`, host };
+  return null;
+}
+
+export function attachPreviewBehaviors(root) {
+  root.addEventListener("click", (event) => {
+    const decision = decideBehavior(event.target);
+    if (!decision) return;
+    event.preventDefault();
+    if (decision.type === "spoiler" || decision.type === "expandable") {
+      decision.host.classList.toggle(decision.toggleClass);
+    } else if (decision.type === "slideshow") {
+      const slides = [...decision.host.querySelectorAll(":scope > :not(.preview-slide-nav)")];
+      const current = Math.max(0, slides.findIndex((s) => s.classList.contains("active")));
+      slides[current]?.classList.remove("active");
+      const next = (current + decision.step + slides.length) % slides.length;
+      slides[next]?.classList.add("active");
+    } else if (decision.type === "anchor-jump") {
+      root.querySelector(`#${CSS.escape(decision.target)}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  });
 }
