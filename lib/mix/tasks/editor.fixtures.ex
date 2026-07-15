@@ -19,12 +19,17 @@ defmodule Mix.Tasks.Editor.Fixtures do
         draft = example[:action] == "stream_card"
         {:ok, rich} = Card.to_rich_message(card, %{draft?: draft})
 
-        %{
-          name: example[:name],
-          kind: example[:kind],
-          action: example[:action],
-          draft: draft,
-          html: rich.html
+        # OrderedObject: atom-keyed map iteration follows atom-table creation
+        # order, which shifts across recompiles — pin the key order so the
+        # committed fixtures file is byte-stable across regenerations.
+        %Jason.OrderedObject{
+          values: [
+            name: example[:name],
+            kind: example[:kind],
+            action: example[:action],
+            draft: draft,
+            html: rich.html
+          ]
         }
       end
 

@@ -11,9 +11,7 @@ defmodule Genswarms.Telegram.CardEditorContractTest do
 
   test "every tag emitted by examples and the all-kinds card is in tags.json" do
     known =
-      MapSet.new(
-        @tags["block_elements"] ++ @tags["inline_elements"] ++ @tags["void_elements"]
-      )
+      MapSet.new(@tags["block_elements"] ++ @tags["inline_elements"] ++ @tags["void_elements"])
 
     cards =
       [all_kinds_card() | Enum.map(Card.examples(), & &1[:card])]
@@ -29,6 +27,7 @@ defmodule Genswarms.Telegram.CardEditorContractTest do
         |> MapSet.new()
 
       unknown = MapSet.difference(emitted, known)
+
       assert MapSet.size(unknown) == 0,
              "card emits tags missing from editor contract: #{inspect(MapSet.to_list(unknown))}"
     end
@@ -44,9 +43,15 @@ defmodule Genswarms.Telegram.CardEditorContractTest do
 
     inline_sampler = [
       "plain ",
-      span.("bold", %{}), span.("italic", %{}), span.("underline", %{}),
-      span.("strikethrough", %{}), span.("spoiler", %{}), span.("mark", %{}),
-      span.("code", %{}), span.("sub", %{}), span.("sup", %{}),
+      span.("bold", %{}),
+      span.("italic", %{}),
+      span.("underline", %{}),
+      span.("strikethrough", %{}),
+      span.("spoiler", %{}),
+      span.("mark", %{}),
+      span.("code", %{}),
+      span.("sub", %{}),
+      span.("sup", %{}),
       span.("link", %{"url" => "https://example.com/"}),
       span.("custom_emoji", %{"emoji_id" => "5368324170671202286"}),
       span.("date_time", %{"unix" => 1_800_000_000}),
@@ -55,7 +60,9 @@ defmodule Genswarms.Telegram.CardEditorContractTest do
       %{"kind" => "mathematical_expression", "expression" => "e = mc^2"},
       span.("email_address", %{"email_address" => "a@example.com"}),
       span.("phone_number", %{"phone_number" => "+34600000000"}),
-      span.("bank_card_number", %{"bank_card_number" => "4111111111111111"}), span.("hashtag", %{}), span.("cashtag", %{}),
+      span.("bank_card_number", %{"bank_card_number" => "4111111111111111"}),
+      span.("hashtag", %{}),
+      span.("cashtag", %{}),
       span.("bot_command", %{}),
       %{"kind" => "anchor", "name" => "top"},
       span.("anchor_link", %{"anchor_name" => "top"}),
@@ -70,12 +77,24 @@ defmodule Genswarms.Telegram.CardEditorContractTest do
         %{"kind" => "heading", "level" => 2, "text" => "Heading"},
         %{"kind" => "paragraph", "text" => inline_sampler},
         %{"kind" => "list", "ordered" => true, "start" => 3, "items" => ["a", "b"]},
-        %{"kind" => "checklist",
-          "items" => [%{"text" => "done", "checked" => true}, %{"text" => "todo"}]},
-        %{"kind" => "table", "bordered" => true, "striped" => true,
-          "caption" => "cap", "headers" => ["H"], "rows" => [["c"]]},
-        %{"kind" => "details", "open" => true, "summary" => "More",
-          "blocks" => [%{"kind" => "paragraph", "text" => "inner"}]},
+        %{
+          "kind" => "checklist",
+          "items" => [%{"text" => "done", "checked" => true}, %{"text" => "todo"}]
+        },
+        %{
+          "kind" => "table",
+          "bordered" => true,
+          "striped" => true,
+          "caption" => "cap",
+          "headers" => ["H"],
+          "rows" => [["c"]]
+        },
+        %{
+          "kind" => "details",
+          "open" => true,
+          "summary" => "More",
+          "blocks" => [%{"kind" => "paragraph", "text" => "inner"}]
+        },
         %{"kind" => "quote", "text" => "q", "credit" => "who"},
         %{"kind" => "blockquote", "expandable" => true, "text" => "long quote"},
         %{"kind" => "pullquote", "text" => "pull", "credit" => "who"},
@@ -85,24 +104,32 @@ defmodule Genswarms.Telegram.CardEditorContractTest do
         %{"kind" => "divider"},
         %{"kind" => "mathematical_expression", "expression" => "\\sum_{i=0}^n i"},
         %{"kind" => "anchor", "name" => "sec"},
-        %{"kind" => "media", "media_type" => "photo",
-          "url" => "https://example.com/a.jpg", "caption" => "photo", "spoiler" => true},
+        %{
+          "kind" => "media",
+          "media_type" => "photo",
+          "url" => "https://example.com/a.jpg",
+          "caption" => "photo",
+          "spoiler" => true
+        },
         %{"kind" => "media", "media_type" => "video", "url" => "https://example.com/v.mp4"},
         %{"kind" => "media", "media_type" => "audio", "url" => "https://example.com/a.mp3"},
         %{"kind" => "media", "media_type" => "animation", "url" => "https://example.com/a.mp4"},
         %{"kind" => "media", "media_type" => "voice_note", "url" => "https://example.com/v.ogg"},
-        %{"kind" => "collage",
+        %{
+          "kind" => "collage",
           "items" => [
             %{"media_type" => "photo", "url" => "https://example.com/1.jpg"},
             %{"media_type" => "photo", "url" => "https://example.com/2.jpg"}
-          ]},
-        %{"kind" => "slideshow",
+          ]
+        },
+        %{
+          "kind" => "slideshow",
           "blocks" => [
             %{"kind" => "media", "media_type" => "photo", "url" => "https://example.com/3.jpg"},
             %{"kind" => "media", "media_type" => "photo", "url" => "https://example.com/4.jpg"}
-          ]},
-        %{"kind" => "references",
-          "items" => [%{"name" => "ref1", "text" => "Reference one"}]},
+          ]
+        },
+        %{"kind" => "references", "items" => [%{"name" => "ref1", "text" => "Reference one"}]},
         %{"kind" => "time", "unix" => 1_800_000_000, "format" => "relative", "text" => "soon"},
         %{"kind" => "map", "latitude" => 41.3874, "longitude" => 2.1686, "zoom" => 12},
         %{"kind" => "thinking", "text" => "draft only"}
