@@ -14,4 +14,4 @@ Ground truth for the preview CSS. Once per Bot API version bump:
 4. Fix CSS with the screenshot open. Do not restyle from memory.
 
 Screenshots are committed here so CSS reviews can diff against them.
-Status: screenshots PENDING — capture before tagging the release.
+Status: deferred at the 0.6.0 release by owner decision — a live editor inspection of the full showcase card stood in; capture real-client screenshots before the next Bot API version bump.

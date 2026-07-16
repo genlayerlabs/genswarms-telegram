@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.0
+## 0.6.0 - 2026-07-16
 
 - New sibling package `genswarms_telegram_editor` (`editor/`): faithful
   browser preview renderer for rich messages, interactive behaviors
