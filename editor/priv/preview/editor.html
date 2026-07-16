@@ -13,6 +13,12 @@
   .stale { opacity: .55; }
   header { grid-column: 1 / -1; padding: .4em 1em; border-bottom: 1px solid #8884;
     display: flex; gap: 1em; align-items: center; }
+  body { background: #fff; color: #111; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1c1c1d; color: #eee; }
+    #card-json { background: #141415; color: #ddd; border-right-color: #333; }
+    header { border-bottom-color: #333; }
+  }
 </style>
 <header>
   <strong>Card editor</strong>
