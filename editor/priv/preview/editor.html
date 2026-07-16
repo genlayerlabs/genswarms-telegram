@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Telegram card editor</title>
+<link rel="stylesheet" href="./telegram_preview.css">
+<style>
+  body { margin: 0; display: grid; grid-template-columns: 1fr 1fr; height: 100vh;
+    font: 14px/1.4 system-ui, sans-serif; }
+  #card-json { border: 0; border-right: 1px solid #8884; padding: 1em;
+    font: 13px/1.5 ui-monospace, monospace; resize: none; }
+  #panel { padding: 1em; overflow: auto; }
+  #preview { max-width: 420px; }
+  .editor-errors { color: #c0392b; }
+  .stale { opacity: .55; }
+  header { grid-column: 1 / -1; padding: .4em 1em; border-bottom: 1px solid #8884;
+    display: flex; gap: 1em; align-items: center; }
+</style>
+<header>
+  <strong>Card editor</strong>
+  <label><input type="checkbox" id="load-media"> load media</label>
+  <span id="status"></span>
+</header>
+<textarea id="card-json" spellcheck="false">{
+  "title": "Hello",
+  "blocks": [{"kind": "paragraph", "text": "Edit me."}]
+}</textarea>
+<div id="panel"><div id="errors"></div><div id="preview" class="preview-rich"></div></div>
+<script type="module">
+  import { attachPreviewBehaviors } from "./telegram_preview.mjs";
+  import { buildRenderRequest, applyRenderResponse } from "./editor_shell.mjs";
+
+  const endpoint = new URLSearchParams(location.search).get("endpoint") || "/studio/render";
+  const input = document.getElementById("card-json");
+  const preview = document.getElementById("preview");
+  const errors = document.getElementById("errors");
+  const loadMedia = document.getElementById("load-media");
+  attachPreviewBehaviors(preview);
+
+  let timer;
+  async function refresh() {
+    const request = buildRenderRequest(input.value);
+    if (!request.ok) { errors.textContent = request.error; preview.classList.add("stale"); return; }
+    const response = await fetch(endpoint, {
+      method: "POST", headers: { "content-type": "application/json" }, body: request.body
+    }).then((r) => r.json()).catch((error) => ({ ok: false, errors: [{ path: "endpoint", reason: String(error) }] }));
+    const out = applyRenderResponse(response, { loadMedia: loadMedia.checked });
+    errors.innerHTML = out.errorsHtml;
+    if (out.html !== null) { preview.innerHTML = out.html; preview.classList.remove("stale"); }
+    else preview.classList.add("stale");
+  }
+  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(refresh, 300); });
+  loadMedia.addEventListener("change", refresh);
+  refresh();
+</script>
