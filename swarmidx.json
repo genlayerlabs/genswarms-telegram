@@ -12,6 +12,14 @@
       "module": "Genswarms.Telegram.Objects.Ingress",
       "deps": ["genlayerlabs/genswarms-dashboard@0.2.0"],
       "note": "deps: the Dashboard module implements genswarms-dashboard's extension contract (schema 1) — data-shaped, no compile dep; the registry dep declares the pairing (design §9)."
+    },
+    {
+      "name": "telegram-editor",
+      "dir": "editor",
+      "kind": "body",
+      "description": "Faithful rich-message preview renderer and editor shell for genswarms-telegram cards (dev tooling; zero runtime deps)",
+      "deps": [],
+      "note": "Version-locked with genswarms-telegram by construction: one repo, one tag, shared tags.json contract tested from both sides in one CI run."
     }
   ]
 }

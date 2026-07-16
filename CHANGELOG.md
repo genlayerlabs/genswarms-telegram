@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0
+
+- New sibling package `genswarms_telegram_editor` (`editor/`): faithful
+  browser preview renderer for rich messages, interactive behaviors
+  (spoiler, expandable quote, slideshow, details), generic editor shell,
+  and the `tags.json` generator↔preview contract enforced from both sides
+  in one CI run.
+- `Card.examples/0` now covers every block kind and an inline span sampler.
+- New `mix editor.fixtures` task bridging rendered examples into the
+  editor's node tests.
+- Calibration procedure + per-tag checklist under `editor/priv/calibration/`.
+
 ## 0.5.1 - 2026-07-12
 
 ### Added
