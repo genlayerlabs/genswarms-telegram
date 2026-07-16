@@ -58,7 +58,12 @@ const FIXED_CLOSE = {
   "tg-math-block": "</div>",
   "tg-math": "</span>",
   "tg-collage": "</div>",
-  "tg-slideshow": "</div>",
+  // Navs come AFTER the slides so the CSS baseline's :first-child default
+  // matches slide 1 (a nav-first order would leave no slide visible until
+  // the first click). Absolute positioning keeps them visually identical.
+  "tg-slideshow":
+    `<button type="button" class="preview-slide-nav" data-slide="-1">‹</button>` +
+    `<button type="button" class="preview-slide-nav" data-slide="1">›</button></div>`,
   "tg-reference": "</div>",
   "tg-emoji": "</span>",
   "tg-time": "</time>"
@@ -172,9 +177,10 @@ function openMarkup(name, rawAttrs) {
     case "tg-collage":
       return `<div class="preview-collage">`;
     case "tg-slideshow":
-      return `<div class="preview-slideshow" data-behavior="slideshow">` +
-        `<button type="button" class="preview-slide-nav" data-slide="-1">‹</button>` +
-        `<button type="button" class="preview-slide-nav" data-slide="1">›</button>`;
+      // Nav buttons are emitted in the CLOSE markup (see FIXED_CLOSE) so
+      // slides precede them in the DOM: the CSS baseline shows the
+      // :first-child slide by default, which must be a slide, not a nav.
+      return `<div class="preview-slideshow" data-behavior="slideshow">`;
     case "tg-reference":
       return `<div class="preview-reference" id="anchor-${escapeHtml(a.name ?? "")}">`;
     case "tg-emoji":
@@ -209,7 +215,7 @@ export function renderPreviewHtml(html, { profile = "rich", loadMedia = false } 
   };
 
   // Strip NUL bytes from input to prevent token substitution corruption
-  const src = String(html ?? "").replaceAll(" ", "");
+  const src = String(html ?? "").replaceAll(TOKEN_DELIM, "");
   const aStack = [];
   let out = "";
   let last = 0;

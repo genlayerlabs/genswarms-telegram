@@ -48,3 +48,26 @@ test("NUL bytes in input cannot corrupt token substitution", () => {
   assert.ok(out.includes("<b>x</b>"));
   assert.ok(!out.includes("\x00"));
 });
+
+test("NUL payload colliding with a real token index cannot duplicate markup", () => {
+  // "\x000\x00" is exactly the sentinel for token index 0 (<b>'s open tag);
+  // if the guard were missing, substitution would inject that markup twice.
+  const out = renderPreviewHtml("\x000\x00<b>x</b>", { profile: "rich" });
+  assert.equal(out.split("<b>").length - 1, 1);
+  assert.equal(out.split("</b>").length - 1, 1);
+  assert.ok(out.includes("<b>x</b>"));
+  assert.ok(!out.includes("\x00"));
+});
+
+test("slideshow markup puts nav buttons AFTER the slides", () => {
+  const out = renderPreviewHtml(
+    `<tg-slideshow><img src="https://a.example/1.png"><img src="https://a.example/2.png"></tg-slideshow>`,
+    { profile: "rich" }
+  );
+  const firstNav = out.indexOf("preview-slide-nav");
+  const firstSlide = out.indexOf("preview-media");
+  assert.ok(firstNav >= 0, "nav buttons present");
+  assert.ok(firstSlide >= 0, "slide media present");
+  assert.ok(firstSlide < firstNav,
+    "first slide must precede the first nav button so :first-child shows a slide");
+});
