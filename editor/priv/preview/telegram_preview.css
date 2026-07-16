@@ -77,7 +77,8 @@ figcaption { font-size: .85em; color: var(--pv-muted); }
 .preview-slideshow { position: relative; }
 .preview-slideshow > :not(.preview-slide-nav):not(.active):not(:first-child)
   { display: none; }
-.preview-slideshow > .active ~ :first-child { display: none; }
+.preview-slideshow:has(> .active:not(:first-child))
+  > :first-child:not(.preview-slide-nav) { display: none; }
 .preview-slide-nav { position: absolute; top: 50%; transform: translateY(-50%);
   z-index: 1; border: 0; border-radius: 50%; width: 1.6em; height: 1.6em;
   background: rgba(0, 0, 0, .45); color: #fff; cursor: pointer; }
