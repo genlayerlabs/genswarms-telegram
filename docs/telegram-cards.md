@@ -1026,3 +1026,14 @@ host-gated with delivery policy.
 Watermarking is intentionally not part of card delivery. Telegram does not layer
 watermarks over media. A future media preprocessor should render watermarks into
 image/video bytes before the sender receives the final media URL.
+
+## Previewing Rich Messages
+
+The sibling `editor/` package (`genswarms_telegram_editor`, same repo, same
+tag) ships a faithful browser preview of everything `Card.to_rich_message/2`
+can emit, plus a generic editor shell. Hosts serve its `priv/preview/`
+assets, provide a validate+render endpoint, and attest at boot that the
+editor's `supported_schema/0` matches `Card.schema_info().version`. The
+tag vocabulary contract lives in `editor/priv/tags.json`; the
+`card_editor_contract_test` keeps generator and preview locked in one CI
+run. See `editor/README.md`.
