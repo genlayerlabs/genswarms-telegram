@@ -75,6 +75,20 @@ defmodule Genswarms.Telegram.SenderActionGateTest do
     # Default stays exactly the pre-knob behavior.
     default_denied = fresh_state(agent_surface: [:core, :own_messages], send_sources: [:worker2])
     assert_gate_denied("send_card", default_denied, :worker2, ":unauthorized_action")
+
+    # Capabilities stay gate-exact for the widened named caller.
+    {_fake, cap_state} =
+      fresh_state(
+        agent_surface: [:core, :own_messages],
+        named_surface: [:cards],
+        send_sources: [:worker]
+      )
+
+    {:reply, body, _state} =
+      Sender.handle_message(:worker, %{"action" => "capabilities"}, cap_state)
+
+    listed = listed_capability_actions(Jason.decode!(body)["capabilities"])
+    assert MapSet.member?(listed, "send_card")
   end
 
   test "bound slots can use each agent group only in their bound conversation" do

@@ -144,6 +144,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
       batch_sources: Map.get(config, :batch_sources, []),
       slot_reply_sources: Map.get(config, :slot_reply_sources, []),
       agent_surface: normalize_agent_surface(Map.get(config, :agent_surface, :standard)),
+      named_surface: normalize_agent_surface(Map.get(config, :named_surface, [])),
       action_grants: normalize_action_grants(Map.get(config, :action_grants, %{})),
       audit_sources: Map.get(config, :audit_sources, [binding_authority]) || [binding_authority],
       own_message_window: Map.get(config, :own_message_window, 200),
@@ -345,7 +346,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
       delete_action?(action) and operator_granted?(from, :message_ops, state) ->
         {:ok, %{class: :operator, group: :message_ops, caller: caller.kind}}
 
-      not agent_group_enabled?(state.agent_surface, group) ->
+      not surface_enabled?(state, caller, group) ->
         {:error, :unauthorized_action}
 
       targetless_agent_action?(action, group) ->
@@ -3368,6 +3369,15 @@ defmodule Genswarms.Telegram.Objects.Sender do
     end)
   end
 
+  # `named_surface` widens the agent surface for TRUSTED deterministic
+  # callers only (named objects still gated by send_sources, plus
+  # :internal); bound and unbound slots never inherit it.
+  defp surface_enabled?(state, caller, group) do
+    agent_group_enabled?(state.agent_surface, group) or
+      (caller.kind in [:named_object, :internal] and
+         MapSet.member?(state.named_surface, group))
+  end
+
   defp agent_group_enabled?(_surface, :discovery), do: true
   defp agent_group_enabled?(surface, group), do: MapSet.member?(surface, group)
 
@@ -3400,6 +3410,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp named_agent_capability_groups(from, state) do
     state.agent_surface
+    |> MapSet.union(state.named_surface)
     |> MapSet.put(:discovery)
     |> Enum.reduce(%{}, fn group, acc ->
       actions =
