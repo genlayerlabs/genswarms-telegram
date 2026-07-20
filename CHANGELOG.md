@@ -11,6 +11,9 @@
 - New `mix editor.fixtures` task bridging rendered examples into the
   editor's node tests.
 - Calibration procedure + per-tag checklist under `editor/priv/calibration/`.
+- Editor preview: `tg-emoji` spans keep their id as an escaped
+  `data-emoji-id` attribute, so gallery hosts can swap in real custom-emoji
+  assets by direct lookup instead of positional pairing.
 
 ## 0.5.1 - 2026-07-12
 
