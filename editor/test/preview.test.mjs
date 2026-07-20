@@ -33,6 +33,23 @@ test("unknown tags stay escaped-visible", () => {
   assert.ok(out.includes("&lt;tg-future&gt;"));
 });
 
+test("tg-emoji keeps its emoji-id as a data attribute on the preview span", () => {
+  const out = renderPreviewHtml(
+    '<tg-emoji emoji-id="5217822164362463825">🟢</tg-emoji>',
+    { profile: "rich" }
+  );
+  assert.ok(
+    out.includes('<span class="preview-emoji" data-emoji-id="5217822164362463825">🟢</span>'),
+    out
+  );
+  // The attribute value is escaped on the way out.
+  const hostile = renderPreviewHtml('<tg-emoji emoji-id=\'a"b\'>x</tg-emoji>', { profile: "rich" });
+  assert.ok(hostile.includes('data-emoji-id="a&quot;b"'), hostile);
+  // An id-less tg-emoji renders the plain span, no empty data attribute.
+  const bare = renderPreviewHtml("<tg-emoji>x</tg-emoji>", { profile: "rich" });
+  assert.ok(bare.includes('<span class="preview-emoji">x</span>'), bare);
+});
+
 test("classic profile rejects rich-only tags but keeps Bot API HTML", () => {
   const classic = renderPreviewHtml(
     '<b>b</b> <tg-spoiler>s</tg-spoiler> <blockquote expandable>q</blockquote>' +

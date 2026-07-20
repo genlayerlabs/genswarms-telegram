@@ -184,7 +184,11 @@ function openMarkup(name, rawAttrs) {
     case "tg-reference":
       return `<div class="preview-reference" id="anchor-${escapeHtml(a.name ?? "")}">`;
     case "tg-emoji":
-      return `<span class="preview-emoji">`;
+      // Keep the id document-faithful so gallery hosts can swap the span
+      // for the real custom-emoji asset without positional guessing.
+      return "emoji-id" in a
+        ? `<span class="preview-emoji" data-emoji-id="${escapeHtml(a["emoji-id"])}">`
+        : `<span class="preview-emoji">`;
     case "tg-time": {
       const dt = a.unix ? new Date(Number(a.unix) * 1000).toISOString() : "";
       return `<time class="preview-time" datetime="${escapeHtml(dt)}"` +
