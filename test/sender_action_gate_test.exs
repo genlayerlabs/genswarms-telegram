@@ -53,6 +53,44 @@ defmodule Genswarms.Telegram.SenderActionGateTest do
     end
   end
 
+  test "named_surface opens extra agent groups to trusted named objects, never to slots" do
+    # Without the knob the minimal surface denies cards for everyone.
+    denied = fresh_state(agent_surface: [:core, :own_messages], send_sources: [:worker])
+    assert_gate_denied("send_card", denied, :worker, ":unauthorized_action")
+
+    {fake, state} =
+      fresh_state(
+        agent_surface: [:core, :own_messages],
+        named_surface: [:cards],
+        send_sources: [:worker]
+      )
+
+    {:noreply, _state} = Sender.handle_message(:worker, payload_for("send_card"), state)
+    assert Enum.any?(Fake.calls(fake), &(&1.method == :send_rich_message))
+
+    # A bound slot does NOT inherit the named surface.
+    bound = bound_state(agent_surface: [:core, :own_messages], named_surface: [:cards])
+    assert_gate_denied("send_card", bound, @bound_slot, ":unauthorized_action")
+
+    # Default stays exactly the pre-knob behavior.
+    default_denied = fresh_state(agent_surface: [:core, :own_messages], send_sources: [:worker2])
+    assert_gate_denied("send_card", default_denied, :worker2, ":unauthorized_action")
+
+    # Capabilities stay gate-exact for the widened named caller.
+    {_fake, cap_state} =
+      fresh_state(
+        agent_surface: [:core, :own_messages],
+        named_surface: [:cards],
+        send_sources: [:worker]
+      )
+
+    {:reply, body, _state} =
+      Sender.handle_message(:worker, %{"action" => "capabilities"}, cap_state)
+
+    listed = listed_capability_actions(Jason.decode!(body)["capabilities"])
+    assert MapSet.member?(listed, "send_card")
+  end
+
   test "bound slots can use each agent group only in their bound conversation" do
     for {group, action} <- @agent_representatives do
       assert Actions.classify(action) == {:agent, group}

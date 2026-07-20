@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.1 - 2026-07-20
+
+- New sender config `named_surface`: agent-action groups enabled ONLY for
+  trusted deterministic callers (named objects still gated by
+  `send_sources`, plus `:internal`) — bound and unbound slots never inherit
+  it, and capabilities stay gate-exact. Default `[]` keeps 0.6.0 behavior.
+  Lets a host keep a minimal `agent_surface` while its own deterministic
+  objects send rich cards (`send_card`/`edit_card`).
+
 ## 0.6.0 - 2026-07-16
 
 - New sibling package `genswarms_telegram_editor` (`editor/`): faithful
