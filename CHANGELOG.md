@@ -7,7 +7,10 @@
   inspect a parent card's visible content and button labels instead of only
   its `message_id`. Absent or non-map values are omitted; nested reply
   chains are still not copied. Both are the raw Telegram maps (string keys,
-  unlike the rest of the event) — transport-level only, so hosts remain
+  unlike the rest of the event); note that inbound `rich_message` is a
+  `RichMessage` — its content is under `["blocks"]`, not the `html`/
+  `markdown` of the outbound `InputRichMessage`. Transport-level only, so
+  hosts remain
   responsible for trust decisions, sanitizing visible content, and keeping
   `callback_data` out of LLM prompts. Note that the whole event, these
   fields included, is handed to the host session runtime verbatim.

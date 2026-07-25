@@ -101,7 +101,15 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
         "text" => "the second one",
         "reply_to_message" => %{
           "message_id" => 30,
-          "rich_message" => %{"html" => "<b>Pick a market</b>"},
+          # Inbound `Message.rich_message` is a RichMessage (blocks), NOT the
+          # outbound InputRichMessage (html/markdown) this package sends.
+          "rich_message" => %{
+            "blocks" => [
+              %{"type" => "heading", "size" => 3, "text" => "Pick a market"},
+              %{"type" => "paragraph", "text" => "Tap the outcome you expect."}
+            ],
+            "is_rtl" => false
+          },
           "reply_markup" => %{
             "inline_keyboard" => [
               [%{"text" => "Rain tomorrow", "callback_data" => "pick:1"}],
@@ -116,7 +124,11 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
     assert {:ok, event} = Parser.parse_update(update)
     assert event.replied_to.message_id == 30
     assert event.replied_to.text == nil
-    assert event.replied_to.rich_message == %{"html" => "<b>Pick a market</b>"}
+
+    assert event.replied_to.rich_message["blocks"] |> Enum.map(& &1["text"]) == [
+             "Pick a market",
+             "Tap the outcome you expect."
+           ]
 
     assert event.replied_to.reply_markup["inline_keyboard"]
            |> List.flatten()
