@@ -423,6 +423,7 @@ defmodule Genswarms.Telegram.IngressEffectsTest do
     assert Ingress.interface() == %{
              actions: ["inject_update", "status", "set_commands", "agent_wake"]
            }
+
     assert {:noreply, ^state} = Ingress.handle_message(:tester, "{bad", state)
 
     {:reply, body, state} = Ingress.handle_message(:tester, %{"action" => "status"}, state)

@@ -2713,7 +2713,9 @@ defmodule Genswarms.Telegram.Objects.Sender do
             )
 
             if Adapter.exported?(state.delivery_effects, :photo_fallback, 2),
-              do: _ = Adapter.call(state.delivery_effects, :photo_fallback, [telegram_payload, reason])
+              do:
+                _ =
+                  Adapter.call(state.delivery_effects, :photo_fallback, [telegram_payload, reason])
 
             telegram_payload
             |> Map.delete(:photo)
@@ -3655,12 +3657,24 @@ defmodule Genswarms.Telegram.Objects.Sender do
     held_len = if cur, do: cur.texts |> Enum.map(&String.length/1) |> Enum.sum(), else: 0
 
     cond do
-      text == "" -> state
-      sig(text) == Map.get(state.last_reply_sig, cid) -> state
-      cur != nil and text in cur.texts -> state
-      cur == nil and map_size(state.held) >= @held_cids_max -> state
-      cur != nil and length(cur.texts) >= @held_max_texts -> state
-      held_len + String.length(text) > @held_max_chars -> state
+      text == "" ->
+        state
+
+      sig(text) == Map.get(state.last_reply_sig, cid) ->
+        state
+
+      cur != nil and text in cur.texts ->
+        state
+
+      cur == nil and map_size(state.held) >= @held_cids_max ->
+        state
+
+      cur != nil and length(cur.texts) >= @held_max_texts ->
+        state
+
+      held_len + String.length(text) > @held_max_chars ->
+        state
+
       true ->
         state = if cur == nil, do: schedule_held_flush(cid, state), else: state
 
@@ -3716,7 +3730,6 @@ defmodule Genswarms.Telegram.Objects.Sender do
           # A failed flush costs one coalesced tail, never the sender.
           case do_send_text(cid, text, %{}, state, %{origin: :reply, from: from, coalesced: true}) do
             {:ok, state} -> state |> stamp_reply(cid, :reply) |> stamp_sig(cid, text, :reply)
-            {:error, _reason, state} -> state
             _other -> state
           end
         end
@@ -3731,7 +3744,6 @@ defmodule Genswarms.Telegram.Objects.Sender do
   end
 
   defp stamp_sig(state, _cid, _text, _origin), do: state
-
 
   defp answered_recently?(cid, state) do
     case Map.get(state.last_reply_ms, cid) do

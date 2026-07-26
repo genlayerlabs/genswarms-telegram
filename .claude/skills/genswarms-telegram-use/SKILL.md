@@ -14,13 +14,14 @@ description: >-
 
 Reusable Telegram transport for GenSwarms: an **Ingress** object (updates in) and
 a **Sender** object (messages out), with no product persona, policy, quota logic,
-or domain commands — those stay in YOUR swarm. `swarmidx:acastellana/genswarms-telegram`.
+or domain commands — those stay in YOUR swarm.
+`swarmidx:genlayerlabs/genswarms-telegram@0.6.2`.
 
 ## Install
 
 ```elixir
 # mix.exs of the host app
-{:genswarms_telegram, github: "genlayerlabs/genswarms-telegram", tag: "v0.2.0"}
+{:genswarms_telegram, github: "genlayerlabs/genswarms-telegram", tag: "v0.6.2"}
 ```
 
 - `genswarms` is a peer/runtime dependency — the HOST app provides it; the package

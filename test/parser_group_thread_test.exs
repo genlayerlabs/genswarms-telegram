@@ -16,7 +16,7 @@ defmodule Genswarms.Telegram.ParserGroupThreadTest do
         Map.merge(
           %{
             "message_id" => 6001,
-            "chat" => %{"id" => -1003762806404, "type" => "supergroup"},
+            "chat" => %{"id" => -1_003_762_806_404, "type" => "supergroup"},
             "from" => %{"id" => 5, "username" => "alice"},
             "text" => "hello"
           },
@@ -64,7 +64,7 @@ defmodule Genswarms.Telegram.ParserGroupThreadTest do
             Map.merge(
               %{
                 "message_id" => 10,
-                "chat" => %{"id" => -1003762806404, "type" => "supergroup"}
+                "chat" => %{"id" => -1_003_762_806_404, "type" => "supergroup"}
               },
               message_extra
             )

@@ -187,9 +187,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
     if authorized_source?(from, state.inject_sources) do
       handle_update(update, state)
     else
-      Logger.warning(
-        "telegram ingress: inject_update from unauthorized #{inspect(from)} dropped"
-      )
+      Logger.warning("telegram ingress: inject_update from unauthorized #{inspect(from)} dropped")
 
       {:error, :unauthorized_inject, state}
     end
@@ -226,6 +224,8 @@ defmodule Genswarms.Telegram.Objects.Ingress do
     end
   end
 
+  defp dispatch(_msg, _from, state), do: {:error, :unknown_action, state}
+
   # Anything but a non-empty string (a map, a number) is a caller bug — fall
   # back to the default label rather than crash the ingress on to_string/1.
   defp wake_kind(msg) do
@@ -234,8 +234,6 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       _ -> "operator"
     end
   end
-
-  defp dispatch(_msg, _from, state), do: {:error, :unknown_action, state}
 
   # A user turn and an operator wake share the whole delivery chain; they
   # differ only in the transcript role, the after_routed kind, and the ack
@@ -516,8 +514,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       state = count_new_session(state, session)
       state = %{state | routed: [%{event: event, session: session} | state.routed]}
 
-      {:ok, %{ok: true, conversation_id: event.conversation_id} |> Map.put(mode.ack, true),
-       state}
+      {:ok, %{ok: true, conversation_id: event.conversation_id} |> Map.put(mode.ack, true), state}
     else
       {:error, reason} -> {:error, reason, state}
     end

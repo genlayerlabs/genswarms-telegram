@@ -59,10 +59,7 @@ defmodule Genswarms.Telegram.SenderRebindTest do
 
   test "init re-seeds claims from the host and a reply delivers without any bind_session" do
     state =
-      boot(
-        {BindingEffects,
-         %{bindings: [%{slot: "telegram_agent_0", conversation_id: @cid}]}}
-      )
+      boot({BindingEffects, %{bindings: [%{slot: "telegram_agent_0", conversation_id: @cid}]}})
 
     assert state.slots == %{"telegram_agent_0" => @cid}
 

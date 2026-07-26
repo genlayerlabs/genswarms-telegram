@@ -13,6 +13,12 @@
   fields included, is handed to the host session runtime verbatim, so hosts
   remain responsible for trust decisions, sanitizing visible content, and
   keeping `callback_data` out of LLM prompts.
+- Release metadata and importer guidance now consistently point to
+  `genlayerlabs/genswarms-telegram@0.6.2`; the editor Mix package version is
+  kept in lockstep with the shared repository tag.
+- `CommandRouter` now declares the tuple-adapter `command_menu_scoped/2`
+  callback and models the module/tuple callback arities as alternatives,
+  matching the adapter behavior without compiler warnings.
 
 ## 0.6.1 - 2026-07-20
 

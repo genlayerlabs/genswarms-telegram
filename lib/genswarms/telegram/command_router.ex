@@ -30,10 +30,14 @@ defmodule Genswarms.Telegram.CommandRouter do
   #                 optional(:user_id) => integer()},
   #        commands: [%{command: String.t(), description: String.t()}]}]
   @callback command_menu_scoped(map()) :: [map()]
+  @callback command_menu_scoped(map(), map()) :: [map()]
 
-  @optional_callbacks handle_command: 3,
+  @optional_callbacks handle_command: 2,
+                      handle_command: 3,
+                      handle_callback: 2,
                       handle_callback: 3,
                       command_menu: 2,
                       command_menu: 3,
-                      command_menu_scoped: 1
+                      command_menu_scoped: 1,
+                      command_menu_scoped: 2
 end

@@ -4,7 +4,7 @@ defmodule GenswarmsTelegramEditor.MixProject do
   def project do
     [
       app: :genswarms_telegram_editor,
-      version: "0.6.0",
+      version: "0.6.2",
       elixir: "~> 1.14",
       description:
         "Telegram rich-message preview renderer and editor shell for genswarms-telegram (dev tooling; zero runtime deps)",

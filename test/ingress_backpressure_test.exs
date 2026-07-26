@@ -45,7 +45,12 @@ defmodule Genswarms.Telegram.Objects.IngressBackpressureTest do
     def ensure_session(cid, _opts),
       do:
         {:ok,
-         %{slot: String.to_atom("slot_" <> cid), conversation_id: cid, workspace: "/tmp/bp", fresh?: true}}
+         %{
+           slot: String.to_atom("slot_" <> cid),
+           conversation_id: cid,
+           workspace: "/tmp/bp",
+           fresh?: true
+         }}
 
     @impl true
     def bind_session(_s, _c, _sinks, _o), do: :ok
@@ -92,7 +97,9 @@ defmodule Genswarms.Telegram.Objects.IngressBackpressureTest do
     # Processing this update exits inside ensure_session (a timed-out add_agent).
     # Before the fix this unwound past schedule_poll and the ingress stopped
     # polling Telegram forever. handle_info must contain it and re-arm.
-    result = Ingress.handle_info({:telegram_poll_result, {:ok, [text_update(500, 500)], 501}}, state)
+    result =
+      Ingress.handle_info({:telegram_poll_result, {:ok, [text_update(500, 500)], 501}}, state)
+
     new_state = state_of(result)
 
     assert new_state.poll_failures >= 1
@@ -102,7 +109,9 @@ defmodule Genswarms.Telegram.Objects.IngressBackpressureTest do
     assert FileStore.read_offset(new_state.bot_ref) == 0
   end
 
-  test "caps new sessions per poll; the rest stay queued in Telegram (offset stops)", %{fake: fake} do
+  test "caps new sessions per poll; the rest stay queued in Telegram (offset stops)", %{
+    fake: fake
+  } do
     state = ingress(fake, FreshRuntime, %{max_new_sessions_per_poll: 2, memory_policy: :none})
 
     # five distinct brand-new conversations arriving in one batch
@@ -122,7 +131,14 @@ defmodule Genswarms.Telegram.Objects.IngressBackpressureTest do
       @behaviour Genswarms.Telegram.SessionRuntime
       @impl true
       def ensure_session(cid, _opts),
-        do: {:ok, %{slot: String.to_atom("w_" <> cid), conversation_id: cid, workspace: "/tmp/bp", fresh?: false}}
+        do:
+          {:ok,
+           %{
+             slot: String.to_atom("w_" <> cid),
+             conversation_id: cid,
+             workspace: "/tmp/bp",
+             fresh?: false
+           }}
 
       @impl true
       def bind_session(_s, _c, _sinks, _o), do: :ok
