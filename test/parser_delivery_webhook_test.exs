@@ -87,6 +87,76 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
     assert event.replied_to.message_id == 19
     assert event.replied_to.text == "Please focus on that part of the answer."
     assert event.replied_to.quote == %{text: "that part", position: 16}
+    refute Map.has_key?(event.replied_to, :rich_message)
+    refute Map.has_key?(event.replied_to, :reply_markup)
+  end
+
+  test "parser preserves a rich parent card's content and button labels" do
+    update = %{
+      "update_id" => 12,
+      "message" => %{
+        "message_id" => 31,
+        "chat" => %{"id" => 123, "type" => "private"},
+        "from" => %{"id" => 5, "username" => "alice"},
+        "text" => "the second one",
+        "reply_to_message" => %{
+          "message_id" => 30,
+          # Inbound `Message.rich_message` is a RichMessage (blocks), NOT the
+          # outbound InputRichMessage (html/markdown) this package sends.
+          "rich_message" => %{
+            "blocks" => [
+              %{"type" => "heading", "size" => 3, "text" => "Pick a market"},
+              %{"type" => "paragraph", "text" => "Tap the outcome you expect."}
+            ],
+            "is_rtl" => false
+          },
+          "reply_markup" => %{
+            "inline_keyboard" => [
+              [%{"text" => "Rain tomorrow", "callback_data" => "pick:1"}],
+              [%{"text" => "Sun tomorrow", "callback_data" => "pick:2"}]
+            ]
+          },
+          "reply_to_message" => %{"message_id" => 29, "text" => "grandparent"}
+        }
+      }
+    }
+
+    assert {:ok, event} = Parser.parse_update(update)
+    assert event.replied_to.message_id == 30
+    assert event.replied_to.text == nil
+
+    assert event.replied_to.rich_message["blocks"] |> Enum.map(& &1["text"]) == [
+             "Pick a market",
+             "Tap the outcome you expect."
+           ]
+
+    assert event.replied_to.reply_markup["inline_keyboard"]
+           |> List.flatten()
+           |> Enum.map(& &1["text"]) == ["Rain tomorrow", "Sun tomorrow"]
+
+    refute Map.has_key?(event.replied_to, :reply_to_message)
+  end
+
+  test "parser omits non-map rich parent fields" do
+    update = %{
+      "update_id" => 13,
+      "message" => %{
+        "message_id" => 41,
+        "chat" => %{"id" => 123, "type" => "private"},
+        "text" => "ok",
+        "reply_to_message" => %{
+          "message_id" => 40,
+          "text" => "plain",
+          "rich_message" => "not-a-map",
+          "reply_markup" => nil
+        }
+      }
+    }
+
+    assert {:ok, event} = Parser.parse_update(update)
+    assert event.replied_to.text == "plain"
+    refute Map.has_key?(event.replied_to, :rich_message)
+    refute Map.has_key?(event.replied_to, :reply_markup)
   end
 
   test "reply-with-quote example builds a valid reply payload" do

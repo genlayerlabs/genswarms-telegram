@@ -126,9 +126,21 @@ defmodule Genswarms.Telegram.Parser do
       text: replied_text(replied),
       quote: text_quote(message)
     }
+    |> maybe_put(:rich_message, map_field(replied, "rich_message"))
+    |> maybe_put(:reply_markup, map_field(replied, "reply_markup"))
   end
 
   defp replied_to(_message), do: nil
+
+  # Transport-level only: the parent card's visible content and button labels
+  # are carried through as-is. Consumers decide what is trusted, sanitize it,
+  # and keep callback data away from an LLM.
+  defp map_field(map, key) do
+    case Map.get(map, key) do
+      value when is_map(value) -> value
+      _ -> nil
+    end
+  end
 
   defp replied_text(message) do
     cond do

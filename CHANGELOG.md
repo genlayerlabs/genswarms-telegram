@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.2 - 2026-07-25
+
+- Parser: `event.replied_to` now also carries the direct parent's
+  `rich_message` and `reply_markup` when they are maps, so consumers can
+  inspect a parent card's visible content and button labels instead of only
+  its `message_id`. Absent or non-map values are omitted; nested reply
+  chains are still not copied. Both are the raw Telegram maps (string keys,
+  unlike the rest of the event); inbound `rich_message` is a `RichMessage`,
+  so its content is under `["blocks"]`, not the `html`/`markdown` of the
+  outbound `InputRichMessage`. Transport-level only: the whole event, these
+  fields included, is handed to the host session runtime verbatim, so hosts
+  remain responsible for trust decisions, sanitizing visible content, and
+  keeping `callback_data` out of LLM prompts.
+
 ## 0.6.1 - 2026-07-20
 
 - New sender config `named_surface`: agent-action groups enabled ONLY for
