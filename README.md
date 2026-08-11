@@ -72,7 +72,9 @@ default runtime uses a bounded opaque slot pool; if a slot is reused it unbinds
 the previous conversation before binding the new one. GenSwarms object binding is
 serialized with an object-state barrier before user text is delivered. Production
 systems can replace the runtime when they need a different persistence, spawn, or
-eviction policy.
+eviction policy. Set `session_opts.inject_conversation_env: false` to omit the raw
+conversation ID from `session.env` and bwrap, Docker, or local backend environments;
+slot binding continues to use the host-side ID. The option defaults to `true`.
 
 ## Defaults
 
@@ -81,7 +83,8 @@ eviction policy.
 - Swarmidx ref: `swarmidx:genlayerlabs/genswarms-telegram@0.6.2`.
 - Sender object: `:telegram_sender`
 - Ingress object: `:telegram_ingress`
-- Agent conversation env: `GENSWARMS_TELEGRAM_CONVERSATION_ID`
+- Agent conversation env: `GENSWARMS_TELEGRAM_CONVERSATION_ID`, injected by
+  default; disable with `session_opts.inject_conversation_env: false`.
 - Reply helper sender env: `GENSWARMS_TELEGRAM_SENDER_OBJECT`
 - Linux state dir: `${XDG_STATE_HOME:-$HOME/.local/state}/genswarms/telegram`
 - Workspace root: `${TMPDIR:-/tmp}/genswarms-telegram`

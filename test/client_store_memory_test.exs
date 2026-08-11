@@ -532,6 +532,52 @@ defmodule Genswarms.Telegram.ClientStoreMemoryTest do
     Process.delete(:genswarms_telegram_test_parent)
   end
 
+  test "default session runtime omits conversation identity from supported backends",
+       %{dir: dir} do
+    Process.put(:genswarms_telegram_test_parent, self())
+
+    base_opts = %{
+      bot_ref: "bot-a",
+      workspace_root: Path.join(dir, "identity-free-backends"),
+      swarm_name: "telegram-test",
+      inject_conversation_env: false,
+      conversation_env: "CID",
+      extra_env: %{"HOST_ENV" => "1"}
+    }
+
+    backends = [
+      {:bwrap, {:bwrap, %{extra_env: %{"BACKEND_ENV" => "bwrap"}}}, :extra_env,
+       %{"BACKEND_ENV" => "bwrap", "HOST_ENV" => "1"}},
+      {:docker, {:docker, "telegram-agent:latest", %{env: %{"BACKEND_ENV" => "docker"}}}, :env,
+       %{"BACKEND_ENV" => "docker", "HOST_ENV" => "1"}},
+      {:local, :local, :extra_env, %{"HOST_ENV" => "1"}}
+    ]
+
+    for {name, backend, env_key, expected_env} <- backends do
+      conversation_id = "tg:#{name}:0"
+      opts = Map.put(base_opts, :agent_template, %{backend: backend})
+
+      assert {:ok, session} = DefaultRuntime.ensure_session(conversation_id, opts)
+      assert session.env == %{"HOST_ENV" => "1"}
+      assert session.conversation_id == conversation_id
+      assert_receive {:swarm_add_agent, "telegram-test", spec, _route_opts}
+
+      backend_opts =
+        case spec.backend do
+          {:bwrap, backend_opts} -> backend_opts
+          {:docker, _image, backend_opts} -> backend_opts
+          {:local, backend_opts} -> backend_opts
+        end
+
+      assert backend_opts.workspace == session.workspace
+      backend_env = Map.fetch!(backend_opts, env_key)
+      assert backend_env == expected_env
+      refute conversation_id in Map.values(backend_env)
+    end
+  after
+    Process.delete(:genswarms_telegram_test_parent)
+  end
+
   test "default session runtime evicts old GenSwarms agents before reusing a full slot pool",
        %{dir: dir} do
     Process.put(:genswarms_telegram_test_parent, self())
