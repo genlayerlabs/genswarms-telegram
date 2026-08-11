@@ -234,7 +234,8 @@ mix test
 git diff --check
 ```
 
-Expected: all commands exit 0 with no warnings or whitespace errors.
+Expected: all commands exit 0 with no new warnings beyond the baseline's
+intentional negative-path Logger output, and with no whitespace errors.
 
 - [ ] **Step 9: Commit the implementation**
 
