@@ -54,8 +54,8 @@ The agent NEVER picks a Telegram target. Inside the agent's shell context:
 priv/reply.sh "the reply text"
 ```
 
-It reads `GENSWARMS_TELEGRAM_CONVERSATION_ID` + `GENSWARMS_TELEGRAM_SENDER_OBJECT`
-from the env the runtime set, and sends via `swarm-msg` to the sender — with NO
+It does not read a conversation ID. It uses `GENSWARMS_TELEGRAM_SENDER_OBJECT`
+(default `telegram_sender`) and sends via `swarm-msg` to the sender — with NO
 target in the payload. The sender resolves the target from the caller's **bound
 slot**: ingress binds slot ↔ conversation BEFORE user text is delivered, replies
 from a bound agent slot go to that conversation only, and an agent-like unbound
