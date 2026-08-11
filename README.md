@@ -53,10 +53,9 @@ used. Consumers that do not want dynamic GenSwarms spawning can inject their own
 - `Genswarms.Telegram.Store.File` and `Context.MemoryMd` — minimal local
   adapters for bot transport state and optional durable per-conversation
   `MEMORY.md`.
-- `priv/reply.sh` — agent reply helper using `GENSWARMS_TELEGRAM_CONVERSATION_ID`
-  and `GENSWARMS_TELEGRAM_SENDER_OBJECT`. The helper does not include a Telegram
-  target in the payload; the sender must resolve the target from the caller's bound
-  slot identity.
+- `priv/reply.sh` — agent reply helper using `GENSWARMS_TELEGRAM_SENDER_OBJECT`.
+  The helper does not include a Telegram target in the payload; the sender must
+  resolve the target from the caller's bound slot identity.
 
 ## What Hosts Provide
 
@@ -75,6 +74,8 @@ systems can replace the runtime when they need a different persistence, spawn, o
 eviction policy. Set `session_opts.inject_conversation_env: false` to omit the raw
 conversation ID from `session.env` and bwrap, Docker, or local backend environments;
 slot binding continues to use the host-side ID. The option defaults to `true`.
+Hosts seeking an identity-free agent-visible workspace path must also set
+`workspace_by: :slot` (or use a pattern without `{conversation_id}`).
 
 ## Defaults
 
