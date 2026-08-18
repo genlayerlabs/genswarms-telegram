@@ -45,6 +45,19 @@ defmodule Genswarms.Telegram.DeliveryEffects do
   @callback reply_unresolvable(term(), map(), map()) :: :ok
 
   @doc """
+  An action was refused by the sender's authorization gate — the message is
+  dropped and never delivered. `from` is the sending object/slot; `meta` carries
+  `:action` and `:reason`.
+
+  Refusals are the one delivery outcome with no other trace: a caller that used
+  an async `deliver_message` cast gets no return value, so without this hook a
+  misconfigured source (for example a named object missing from `send_sources`)
+  fails silently and indefinitely. Hosts implement it to log or count refusals.
+  """
+  @callback action_refused(term(), map()) :: :ok
+  @callback action_refused(term(), map(), map()) :: :ok
+
+  @doc """
   Asked once at sender init: the CURRENT slot→conversation bindings, so a
   restarted sender (whose claims are process-local) re-seeds them instead of
   dropping in-flight agent replies as "no target" until the next inbound
@@ -55,7 +68,9 @@ defmodule Genswarms.Telegram.DeliveryEffects do
   @callback current_bindings() :: [map()]
   @callback current_bindings(map()) :: [map()]
 
-  @optional_callbacks before_send: 2,
+  @optional_callbacks action_refused: 2,
+                      action_refused: 3,
+                      before_send: 2,
                       after_send: 3,
                       delivery_failed: 3,
                       redact_outbound: 3,

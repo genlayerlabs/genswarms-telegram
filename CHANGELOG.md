@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Sender: refused actions now reach the host through a new optional
+  `DeliveryEffects.action_refused/2,3` hook (`from`, plus `:action` and
+  `:reason`). A refusal was previously the one delivery outcome with no trace
+  at all: the authorization gate returns an error tuple, but callers using the
+  async `deliver_message/4` cast discard it, so a named object missing from
+  `send_sources` failed silently and indefinitely with nothing logged, counted,
+  or surfaced. The ingress object already reports unauthorized drops; the
+  sender now matches it. Optional callback — hosts that don't implement it are
+  unaffected, and no delivery behavior changes.
+
 ## 0.6.2 - 2026-07-25
 
 - Parser: `event.replied_to` now also carries the direct parent's

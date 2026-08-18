@@ -318,6 +318,11 @@ defmodule Genswarms.Telegram.Objects.Sender do
         {:error, :unbound_slot, state}
 
       {:error, reason} ->
+        # Every other refusal drops the message with no other trace: an async
+        # `deliver_message` cast discards this tuple, so a misconfigured source
+        # (e.g. a named object missing from `send_sources`) fails silently and
+        # indefinitely. Surface it to the host, as the unbound-slot arm does.
+        _ = maybe_effect(state, :action_refused, [from, %{action: action, reason: reason}])
         {:error, reason, state}
     end
   end
