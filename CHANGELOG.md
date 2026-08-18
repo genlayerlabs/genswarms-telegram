@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.3 - 2026-08-18
+
+- Sender: accept a plain final response from an agent-shaped slot as a
+  conversation-scoped `reply`. This completes the Genswarms `reply_to`
+  auto-delivery path for models that return user-facing text instead of using
+  the explicit sender action. The existing slot binding remains authoritative,
+  so neither plain nor JSON-looking text can choose a different conversation;
+  unbound slots continue to fail closed.
+- Release metadata and both Mix package versions now point to 0.6.3.
+
 ## 0.6.2 - 2026-07-25
 
 - Parser: `event.replied_to` now also carries the direct parent's
