@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Ingress: a `:poll` tick now reaps a stale `poll_ref` (latched reference whose
+  task is gone, e.g. after crash containment reverted handler state) and
+  repolls instead of dropping the tick — previously this silently killed
+  polling forever inside a live object. Genuine in-flight polls still
+  deduplicate ticks (new `poll_pid` tracking).
+- OffsetFile: a failed offset write is now logged (best-effort `:ok` contract
+  unchanged). A silently frozen offset makes Telegram re-serve the same
+  ≤100-update window forever — total ingestion silence with green health
+  gauges.
+
 ## 0.6.3 - 2026-08-18
 
 - Sender: accept a plain final response from an agent-shaped slot as a

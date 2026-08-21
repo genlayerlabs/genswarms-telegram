@@ -56,6 +56,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       # spawn) opened per poll; the rest stay queued in Telegram for next cycle
       max_new_sessions_per_poll: Map.get(config, :max_new_sessions_per_poll, 8),
       poll_ref: nil,
+      poll_pid: nil,
       poll_failures: 0,
       last_poll_ok_ms: nil,
       conflict_count: 0,
@@ -96,23 +97,24 @@ defmodule Genswarms.Telegram.Objects.Ingress do
     end
   end
 
-  def handle_info(:poll, %{poll_ref: ref} = state) when is_reference(ref), do: {:noreply, state}
+  # A latched poll_ref only dedupes ticks while its task is genuinely alive.
+  # If the handler state was ever reverted by crash containment (ObjectServer
+  # keeps the PRE-call state on a raise during send-many fan-out), the ref can
+  # outlive its finished task — and since re-arming happens only in the result
+  # and :DOWN paths, dropping the tick here would kill polling forever: a dead
+  # poller inside a live object (genmochi prod, 2026-08-21). Reap and repoll.
+  def handle_info(:poll, %{poll_ref: ref} = state) when is_reference(ref) do
+    pid = Map.get(state, :poll_pid)
 
-  def handle_info(:poll, state) do
-    parent = self()
-    opts = poll_opts(state)
-
-    {:ok, pid} =
-      Task.start(fn ->
-        send(
-          parent,
-          {:telegram_poll_result,
-           Poller.fetch_updates(state.client, state.store, state.bot_ref, opts)}
-        )
-      end)
-
-    {:noreply, %{state | poll_ref: Process.monitor(pid)}}
+    if is_pid(pid) and Process.alive?(pid) do
+      {:noreply, state}
+    else
+      Logger.warning("telegram ingress poll ref was stale (task gone); reaping and repolling")
+      state |> demonitor_poll() |> start_poll()
+    end
   end
+
+  def handle_info(:poll, state), do: start_poll(state)
 
   def handle_info({:telegram_poll_result, result}, state) do
     state = demonitor_poll(state)
@@ -155,12 +157,28 @@ defmodule Genswarms.Telegram.Objects.Ingress do
       "telegram ingress poll task died before result (#{failures} in a row): #{inspect(reason)}"
     )
 
-    state = %{state | poll_ref: nil, poll_failures: failures}
+    state = %{state | poll_ref: nil, poll_pid: nil, poll_failures: failures}
     schedule_poll(state)
     {:noreply, state}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  defp start_poll(state) do
+    parent = self()
+    opts = poll_opts(state)
+
+    {:ok, pid} =
+      Task.start(fn ->
+        send(
+          parent,
+          {:telegram_poll_result,
+           Poller.fetch_updates(state.client, state.store, state.bot_ref, opts)}
+        )
+      end)
+
+    {:noreply, %{state | poll_ref: Process.monitor(pid), poll_pid: pid}}
+  end
 
   defp dispatch(%{"action" => "status"}, _from, state) do
     {:ok,
@@ -907,7 +925,7 @@ defmodule Genswarms.Telegram.Objects.Ingress do
 
   defp demonitor_poll(%{poll_ref: ref} = state) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
-    %{state | poll_ref: nil}
+    %{state | poll_ref: nil, poll_pid: nil}
   end
 
   defp demonitor_poll(state), do: state

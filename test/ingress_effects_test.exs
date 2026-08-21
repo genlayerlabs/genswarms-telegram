@@ -352,13 +352,18 @@ defmodule Genswarms.Telegram.IngressEffectsTest do
        %{
          fake: fake
        } do
-    ref = make_ref()
+    # a GENUINE in-flight duplicate: the ref's task is alive. (A ref whose
+    # task is gone is a stale latch and gets reaped+repolled instead — see
+    # ingress_poll_stall_test.exs.)
+    task = spawn(fn -> Process.sleep(:infinity) end)
+    ref = Process.monitor(task)
 
     state =
       ingress(fake, :cont)
-      |> Map.merge(%{poll_ref: ref, poll_enabled: false, poll_failures: 0})
+      |> Map.merge(%{poll_ref: ref, poll_pid: task, poll_enabled: false, poll_failures: 0})
 
     assert {:noreply, ^state} = Ingress.handle_info(:poll, state)
+    Process.exit(task, :kill)
 
     {:noreply, crashed} = Ingress.handle_info({:DOWN, ref, :process, self(), :boom}, state)
     assert crashed.poll_ref == nil
