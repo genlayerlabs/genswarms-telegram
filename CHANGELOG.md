@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Sender: refused actions now reach the host through a new optional
+  `DeliveryEffects.action_refused/2,3` hook (`from`, plus `:action` and
+  `:reason`). A refusal was previously the one delivery outcome with no trace
+  at all: the authorization gate returns an error tuple, but callers using the
+  async `deliver_message/4` cast discard it, so a named object missing from
+  `send_sources` failed silently and indefinitely with nothing logged, counted,
+  or surfaced. The ingress object already reports unauthorized drops; the
+  sender now matches it. Optional callback — hosts that don't implement it are
+  unaffected, and no delivery behavior changes.
 - Ingress: a `:poll` tick now reaps a stale `poll_ref` (latched reference whose
   task is gone, e.g. after crash containment reverted handler state) and
   repolls instead of dropping the tick — previously this silently killed
@@ -11,6 +20,17 @@
   unchanged). A silently frozen offset makes Telegram re-serve the same
   ≤100-update window forever — total ingestion silence with green health
   gauges.
+
+## 0.6.4 - 2026-08-21
+
+- Parser: photo messages now carry the attached photo's `file_id` as
+  `event.photo` (the largest `PhotoSize` — Telegram orders the array smallest
+  to largest). The media *kind* alone cannot be re-sent, and a caption command
+  (a photo captioned `/verb …`) needs the id to act on the image; hosts can
+  feed it straight to `send_photo`/`send_batch`, which already accept a
+  file_id or URL verbatim. Absent on non-photo messages and on malformed
+  photo arrays. Transport-level only: the id is Telegram's opaque, bot-scoped
+  handle; hosts remain responsible for deciding where it may be re-sent.
 
 ## 0.6.3 - 2026-08-18
 
