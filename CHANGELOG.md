@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.4 - Unreleased
+## 0.6.4 - 2026-08-21
 
 - Parser: photo messages now carry the attached photo's `file_id` as
   `event.photo` (the largest `PhotoSize` — Telegram orders the array smallest
