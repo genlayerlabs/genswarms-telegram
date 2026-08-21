@@ -65,6 +65,61 @@ defmodule Genswarms.Telegram.ParserDeliveryWebhookTest do
              Parser.parse_update(member)
   end
 
+  test "parser keeps an attached photo's file_id (largest size) alongside the caption" do
+    photo_update = %{
+      "update_id" => 2,
+      "message" => %{
+        "message_id" => 11,
+        "chat" => %{"id" => 123, "type" => "private"},
+        "from" => %{"id" => 5, "username" => "alice"},
+        "caption" => "/verb @handle hello",
+        "photo" => [
+          %{"file_id" => "small", "width" => 90, "height" => 90},
+          %{"file_id" => "medium", "width" => 320, "height" => 320},
+          %{"file_id" => "large", "width" => 1280, "height" => 1280}
+        ]
+      }
+    }
+
+    assert {:ok, event} = Parser.parse_update(photo_update)
+    # The caption is the text (so caption commands route as commands), the
+    # media KIND stays, and the file_id of the LARGEST size (Telegram orders
+    # the array smallest → largest) rides along for hosts to re-send.
+    assert event.type == :text
+    assert event.text == "/verb @handle hello"
+    assert event.media == "photo"
+    assert event.photo == "large"
+
+    # Non-photo messages carry no :photo key at all.
+    {:ok, plain} =
+      Parser.parse_update(%{
+        "update_id" => 3,
+        "message" => %{
+          "message_id" => 12,
+          "chat" => %{"id" => 123, "type" => "private"},
+          "from" => %{"id" => 5},
+          "text" => "hello"
+        }
+      })
+
+    refute Map.has_key?(plain, :photo)
+
+    # A malformed photo array degrades to no :photo — never a crash.
+    {:ok, weird} =
+      Parser.parse_update(%{
+        "update_id" => 4,
+        "message" => %{
+          "message_id" => 13,
+          "chat" => %{"id" => 123, "type" => "private"},
+          "from" => %{"id" => 5},
+          "caption" => "cap",
+          "photo" => ["garbage"]
+        }
+      })
+
+    refute Map.has_key?(weird, :photo)
+  end
+
   test "parser exposes replied-to text quote context" do
     update = %{
       "update_id" => 11,

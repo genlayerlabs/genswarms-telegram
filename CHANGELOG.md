@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.4 - Unreleased
+
+- Parser: photo messages now carry the attached photo's `file_id` as
+  `event.photo` (the largest `PhotoSize` — Telegram orders the array smallest
+  to largest). The media *kind* alone cannot be re-sent, and a caption command
+  (a photo captioned `/verb …`) needs the id to act on the image; hosts can
+  feed it straight to `send_photo`/`send_batch`, which already accept a
+  file_id or URL verbatim. Absent on non-photo messages and on malformed
+  photo arrays. Transport-level only: the id is Telegram's opaque, bot-scoped
+  handle; hosts remain responsible for deciding where it may be re-sent.
+
 ## 0.6.3 - 2026-08-18
 
 - Sender: accept a plain final response from an agent-shaped slot as a
