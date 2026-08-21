@@ -34,6 +34,17 @@ defmodule Genswarms.Telegram.OffsetFileWriteFailureTest do
     assert log =~ "offset"
   end
 
+  test "a non-binary path cannot crash the caller" do
+    # malformed configuration can hand write/2 a map; the rescue path must not
+    # raise AGAIN while formatting the path into the log line
+    log =
+      capture_log(fn ->
+        assert :ok = OffsetFile.write(%{bad: :config}, 42)
+      end)
+
+    assert log =~ "offset"
+  end
+
   test "a successful write stays silent" do
     dir = Path.join(System.tmp_dir!(), "gst-offset-ok-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf(dir) end)

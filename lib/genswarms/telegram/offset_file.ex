@@ -42,7 +42,7 @@ defmodule Genswarms.Telegram.OffsetFile do
   """
   def write(nil, _offset), do: :ok
 
-  def write(path, offset) when is_integer(offset) and offset >= 0 do
+  def write(path, offset) when is_binary(path) and is_integer(offset) and offset >= 0 do
     File.mkdir_p(Path.dirname(path))
 
     case File.write(path, Integer.to_string(offset)) do
@@ -59,11 +59,14 @@ defmodule Genswarms.Telegram.OffsetFile do
     end
   rescue
     e ->
-      Logger.warning("telegram offset write raised (#{path}): #{Exception.message(e)}")
+      Logger.warning("telegram offset write raised (#{inspect(path)}): #{Exception.message(e)}")
       :ok
   end
 
-  def write(_path, _offset), do: :ok
+  def write(path, offset) do
+    Logger.warning("telegram offset write skipped: bad path/offset #{inspect({path, offset})}")
+    :ok
+  end
 
   def token_tag(token),
     do: :crypto.hash(:sha256, token) |> Base.encode16(case: :lower) |> binary_part(0, 8)

@@ -57,7 +57,9 @@ defmodule Genswarms.Telegram.Objects.IngressPollStallTest do
     # the reverted-state scenario: the ref's task is long gone
     dead = spawn(fn -> :ok end)
     ref = Process.monitor(dead)
-    Process.demonitor(ref, [:flush])
+    # wait for actual termination before demonitoring — an unscheduled spawn
+    # could otherwise still be alive here (review: nondeterministic fixture)
+    assert_receive {:DOWN, ^ref, :process, ^dead, _reason}, 1_000
     refute Process.alive?(dead)
 
     stale = %{state | poll_ref: ref} |> Map.put(:poll_pid, dead)
