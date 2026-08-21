@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.5 - 2026-08-21
 
 - Sender: refused actions now reach the host through a new optional
   `DeliveryEffects.action_refused/2,3` hook (`from`, plus `:action` and
