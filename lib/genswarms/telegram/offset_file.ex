@@ -6,6 +6,8 @@ defmodule Genswarms.Telegram.OffsetFile do
   integer file instead of using `Genswarms.Telegram.Store.File`'s JSON state.
   """
 
+  require Logger
+
   @doc """
   Derive a per-token offset file path from a configured base path.
 
@@ -32,18 +34,39 @@ defmodule Genswarms.Telegram.OffsetFile do
     end
   end
 
-  @doc "Persist the getUpdates offset best-effort."
+  @doc """
+  Persist the getUpdates offset best-effort: always `:ok` (a poll cycle must
+  never crash on a bookkeeping write), but a failure is LOGGED — a silently
+  frozen offset makes Telegram re-serve the same ≤100-update window forever,
+  which reads as total ingestion silence with every health gauge green.
+  """
   def write(nil, _offset), do: :ok
 
-  def write(path, offset) when is_integer(offset) and offset >= 0 do
+  def write(path, offset) when is_binary(path) and is_integer(offset) and offset >= 0 do
     File.mkdir_p(Path.dirname(path))
-    File.write(path, Integer.to_string(offset))
-    :ok
+
+    case File.write(path, Integer.to_string(offset)) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "telegram offset write failed (#{path}): #{inspect(reason)} — " <>
+            "offset frozen until the path is writable again"
+        )
+
+        :ok
+    end
   rescue
-    _ -> :ok
+    e ->
+      Logger.warning("telegram offset write raised (#{inspect(path)}): #{Exception.message(e)}")
+      :ok
   end
 
-  def write(_path, _offset), do: :ok
+  def write(path, offset) do
+    Logger.warning("telegram offset write skipped: bad path/offset #{inspect({path, offset})}")
+    :ok
+  end
 
   def token_tag(token),
     do: :crypto.hash(:sha256, token) |> Base.encode16(case: :lower) |> binary_part(0, 8)
