@@ -83,6 +83,7 @@ defmodule Genswarms.Telegram.Parser do
         identity: identity(Map.get(message, "from", %{}))
       }
       |> maybe_put(:replied_to, replied_to(message))
+      |> maybe_put(:photo, photo_file_id(message))
 
     {:ok, maybe_pending_message_ids(event, update)}
   end
@@ -118,6 +119,19 @@ defmodule Genswarms.Telegram.Parser do
   defp media_kind(message) do
     Enum.find(@text_media, &Map.has_key?(message, &1))
   end
+
+  # An attached photo's file_id — the media KIND alone can't be re-sent, and a
+  # caption command (a photo captioned "/verb …") needs the id to act on the
+  # image. Telegram orders the PhotoSize array smallest → largest; the largest
+  # is the one worth re-sending. Malformed entries degrade to no field.
+  defp photo_file_id(%{"photo" => sizes}) when is_list(sizes) do
+    case List.last(sizes) do
+      %{"file_id" => id} when is_binary(id) and id != "" -> id
+      _ -> nil
+    end
+  end
+
+  defp photo_file_id(_message), do: nil
 
   defp replied_to(%{"reply_to_message" => %{"message_id" => id} = replied} = message)
        when is_integer(id) do

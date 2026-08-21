@@ -62,6 +62,45 @@ defmodule Genswarms.Telegram.ObjectsTest do
     assert Jason.decode!(body)["ok"] == false
   end
 
+  test "sender turns bound-slot plain output into a target-locked reply", %{fake: fake} do
+    {:ok, state} =
+      Sender.init(%{
+        bot_token: "token",
+        client: Fake,
+        client_opts: [fake: fake],
+        binding_authority: :telegram_ingress,
+        slot_prefix: "telegram_agent"
+      })
+
+    state =
+      Enum.reduce([{"telegram_agent_0", "tg:1:0"}, {"telegram_agent_1", "tg:2:0"}], state, fn
+        {slot, cid}, acc ->
+          {:noreply, next} =
+            Sender.handle_message(
+              :telegram_ingress,
+              %{"action" => "bind_session", "slot" => slot, "conversation_id" => cid},
+              acc
+            )
+
+          next
+      end)
+
+    {:noreply, state} = Sender.handle_message(:telegram_agent_0, "plain final answer", state)
+
+    {:noreply, state} =
+      Sender.handle_message(:telegram_agent_1, ~s({"answer":"JSON-looking prose"}), state)
+
+    assert Enum.map(Fake.calls(fake), &{&1.payload.chat_id, &1.payload.text}) == [
+             {"1", "plain final answer"},
+             {"2", ~s({"answer":"JSON-looking prose"})}
+           ]
+
+    {:reply, body, _state} =
+      Sender.handle_message(:telegram_agent_9, "unbound output", state)
+
+    assert Jason.decode!(body) == %{"error" => ":unbound_slot", "ok" => false}
+  end
+
   test "sender validates reply tags and retries plain text on Telegram parse errors", %{
     fake: fake
   } do

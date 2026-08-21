@@ -12,6 +12,27 @@
   sender now matches it. Optional callback — hosts that don't implement it are
   unaffected, and no delivery behavior changes.
 
+## 0.6.4 - 2026-08-21
+
+- Parser: photo messages now carry the attached photo's `file_id` as
+  `event.photo` (the largest `PhotoSize` — Telegram orders the array smallest
+  to largest). The media *kind* alone cannot be re-sent, and a caption command
+  (a photo captioned `/verb …`) needs the id to act on the image; hosts can
+  feed it straight to `send_photo`/`send_batch`, which already accept a
+  file_id or URL verbatim. Absent on non-photo messages and on malformed
+  photo arrays. Transport-level only: the id is Telegram's opaque, bot-scoped
+  handle; hosts remain responsible for deciding where it may be re-sent.
+
+## 0.6.3 - 2026-08-18
+
+- Sender: accept a plain final response from an agent-shaped slot as a
+  conversation-scoped `reply`. This completes the Genswarms `reply_to`
+  auto-delivery path for models that return user-facing text instead of using
+  the explicit sender action. The existing slot binding remains authoritative,
+  so neither plain nor JSON-looking text can choose a different conversation;
+  unbound slots continue to fail closed.
+- Release metadata and both Mix package versions now point to 0.6.3.
+
 ## 0.6.2 - 2026-07-25
 
 - Parser: `event.replied_to` now also carries the direct parent's

@@ -198,7 +198,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
   end
 
   def handle_message(from, message, state) do
-    with {:ok, msg} <- decode(message),
+    with {:ok, msg} <- decode(from, message, state),
          {:ok, state} <- dispatch(from, msg, state) do
       {:noreply, state}
     else
@@ -4030,8 +4030,27 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp monotonic_ms, do: System.monotonic_time(:millisecond)
 
-  defp decode(message) when is_binary(message), do: Jason.decode(message)
-  defp decode(message) when is_map(message), do: {:ok, message}
+  # Genswarms `reply_to` auto-delivery hands the sink the turn's final text as
+  # a plain binary. Accept that fallback only from an agent-shaped slot: the
+  # normal action payload remains authoritative, and the existing bound-slot
+  # authorization below still forces the reply to the slot's conversation.
+  # This also covers JSON-looking prose (for example `{"answer":"..."}`),
+  # which is user-facing text unless it carries an explicit action.
+  defp decode(from, message, state) when is_binary(message) do
+    case Jason.decode(message) do
+      {:ok, %{"action" => _action} = decoded} ->
+        {:ok, decoded}
+
+      decoded_or_error ->
+        if agent_like?(to_string(from), state) do
+          {:ok, %{"action" => "reply", "text" => message}}
+        else
+          decoded_or_error
+        end
+    end
+  end
+
+  defp decode(_from, message, _state) when is_map(message), do: {:ok, message}
 
   defp truthy?(value), do: value in [true, "true", 1, "1"]
 end
