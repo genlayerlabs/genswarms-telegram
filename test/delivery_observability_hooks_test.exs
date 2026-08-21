@@ -42,6 +42,12 @@ defmodule Genswarms.Telegram.DeliveryObservabilityHooksTest do
     end
 
     @impl true
+    def action_refused(from, meta, %{test_pid: pid}) do
+      send(pid, {:action_refused, from, meta})
+      :ok
+    end
+
+    @impl true
     def reply_unresolvable(from, meta, %{test_pid: pid}) do
       send(pid, {:reply_unresolvable, from, meta})
       :ok
@@ -143,4 +149,28 @@ defmodule Genswarms.Telegram.DeliveryObservabilityHooksTest do
     assert %{"ok" => false} = Jason.decode!(body)
     assert_received {:reply_unresolvable, :telegram_agent_9, %{origin: :reply}}
   end
+
+  test "action_refused fires when a named source is not in send_sources" do
+    {:ok, state} =
+      Sender.init(%{
+        dry_run: true,
+        binding_authority: :telegram_ingress,
+        slot_prefix: "telegram_agent",
+        delivery_effects: {ObservabilityEffects, %{test_pid: self()}}
+      })
+
+    # :host_notifier is a named object that was never added to send_sources
+    # (which defaults to [binding_authority]). The send is refused — and until
+    # this hook existed the refusal was returned into a cast and vanished.
+    {:reply, body, _state} =
+      Sender.handle_message(
+        :host_notifier,
+        %{"action" => "send", "conversation_id" => "tg:55:0", "text" => "hi"},
+        state
+      )
+
+    assert %{"ok" => false} = Jason.decode!(body)
+    assert_received {:action_refused, :host_notifier, %{action: "send", reason: :unauthorized_target}}
+  end
+
 end
