@@ -16,6 +16,11 @@ defmodule Genswarms.Telegram.SenderLinkPreviewTest do
   defmodule Effects do
     @behaviour Genswarms.Telegram.DeliveryEffects
 
+    # The behaviour requires the /1 arity even when only the /2 (configured)
+    # form is used — omitting it warns at compile time.
+    @impl true
+    def before_send(_payload), do: :ok
+
     @impl true
     def before_send(payload, %{test_pid: pid}) do
       send(pid, {:payload, payload})
