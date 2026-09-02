@@ -557,6 +557,12 @@ defmodule Genswarms.Telegram.Objects.Ingress do
     if is_integer(offset),
       do: Adapter.call(state.store, :write_offset, [state.bot_ref, offset])
 
+    # A skipped crash still counts as a failed poll. The offset moved, so the
+    # queue is not stuck — but `poll_failures` is the health signal the host
+    # reads through `notify_health_sink/1`, and silently absorbing crashes here
+    # would zero the one counter that makes this class of fault visible.
+    status = if Map.get(state, :crashed_updates, 0) > 0, do: {:error, :update_crashed}, else: status
+
     state =
       if status == :ok do
         %{state | poll_failures: 0, last_poll_ok_ms: System.system_time(:millisecond)}
@@ -582,11 +588,11 @@ defmodule Genswarms.Telegram.Objects.Ingress do
   defp process_polled_updates(updates, state) do
     start_offset = Adapter.call(state.store, :read_offset, [state.bot_ref])
     cap = Map.get(state, :max_new_sessions_per_poll, 8)
-    state = Map.put(state, :new_sessions_this_poll, 0)
+    state = state |> Map.put(:new_sessions_this_poll, 0) |> Map.put(:crashed_updates, 0)
 
     Enum.reduce_while(updates, {state, [], start_offset, :ok}, fn update,
                                                                   {acc, messages, offset, _status} ->
-      case handle_update(update, acc) do
+      case safe_handle_update(update, acc) do
         {:ok, _reply, next} ->
           cont_or_halt(next, {next, messages, next_update_offset(update, offset), :ok}, cap)
 
@@ -623,6 +629,35 @@ defmodule Genswarms.Telegram.Objects.Ingress do
     else
       {:cont, acc}
     end
+  end
+
+  # A CRASHING UPDATE MUST NOT BLOCK THE QUEUE FOREVER.
+  #
+  # `handle_update/2` can raise or exit — it spawns agents and calls into host
+  # code, and a `GenServer.call` to an agent that has just died exits `:noproc`.
+  # Uncaught, that unwinds this whole reduce, so `handle_poll_result/2` never
+  # reaches its `write_offset` and the offset accumulated by every update
+  # already processed in this batch is lost too. The caller contains the crash
+  # and re-arms the timer, so the same batch is fetched again, crashes again,
+  # and the bot goes deaf behind one bad update — observed in production for
+  # ten hours across every group (763 consecutive crashes, one every ~48s).
+  #
+  # Contain it per update and ADVANCE PAST IT. Dropping one update loudly is
+  # strictly better than never delivering any update again: an update whose
+  # handling crashes deterministically will crash on every redelivery, so
+  # retrying it forever cannot succeed and costs the whole queue behind it.
+  # A handled `{:error, _}` still halts and retries as before — only a crash,
+  # which was previously unrecoverable, is skipped.
+  defp safe_handle_update(update, acc) do
+    handle_update(update, acc)
+  catch
+    kind, reason ->
+      Logger.error(
+        "telegram ingress: update #{inspect(Map.get(update, "update_id"))} crashed, " <>
+          "skipping it to keep the queue moving: #{inspect(kind)} #{inspect(reason)}"
+      )
+
+      {:ok, nil, Map.update(acc, :crashed_updates, 1, &(&1 + 1))}
   end
 
   defp next_update_offset(%{"update_id" => update_id}, offset) when is_integer(update_id),
