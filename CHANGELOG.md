@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Curl transport removes its private temporary directory after cleaning up the
+  request files, instead of leaving one empty directory per request.
+
 ## 0.6.5 - 2026-08-21
 
 - Sender: refused actions now reach the host through a new optional
