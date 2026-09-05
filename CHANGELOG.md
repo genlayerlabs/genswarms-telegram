@@ -1,7 +1,24 @@
 # Changelog
 
-## Unreleased
+## 0.6.6 - Unreleased
 
+- Sender/Delivery: `link_preview_options` is now honoured on the SEND path, so
+  a link preview is a per-message decision instead of a transport-wide one.
+  `build_send_message/1` hardcoded `disable_web_page_preview: true` and the
+  sender built its attrs from a fixed key set with no preview key, so no
+  message this transport sent could ever carry a preview and nothing a caller
+  put in the message map changed it — while `build_edit_message_text/1` already
+  accepted the option, meaning a message could be *edited* into having a
+  preview it could never be *sent* with. Same option name and shape as the edit
+  builder; read by atom or string key. **The default is unchanged**: with no
+  option the payload still carries `disable_web_page_preview: true`, which is
+  the right default for an agent quoting a URL mid-thread and the wrong one for
+  an operator broadcast — those now differ per message. An explicit option wins
+  and the deprecated flag is then omitted (Bot API 7.0 replaced
+  `disable_web_page_preview` with `link_preview_options`); a non-object option
+  raises rather than being silently dropped. Applied to every chunk of a
+  chunked message, since chunking is the transport's own detail and Telegram
+  previews at most the first link of each message it actually sends.
 - Curl transport removes its private temporary directory after cleaning up the
   request files, instead of leaving one empty directory per request.
 

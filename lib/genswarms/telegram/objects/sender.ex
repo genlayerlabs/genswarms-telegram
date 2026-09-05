@@ -1346,6 +1346,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
     reply_to = validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state)
     reply_attrs = reply_attrs(reply_to, msg)
     reply_markup = message_reply_markup(msg)
+    link_preview = Map.get(msg, "link_preview_options")
     photo = photo_for_text(Map.get(msg, "photo"), text)
 
     {results, state} =
@@ -1359,6 +1360,15 @@ defmodule Genswarms.Telegram.Objects.Sender do
         }
 
         attrs = if idx == 0, do: Map.merge(attrs, reply_attrs), else: attrs
+
+        # Per-message, and deliberately on EVERY chunk rather than only the
+        # first: chunking is our implementation detail, not something the
+        # caller asked for, and Telegram previews at most the first link of
+        # each message it actually sends. A chunk with no link is unaffected.
+        attrs =
+          if link_preview,
+            do: Map.put(attrs, :link_preview_options, link_preview),
+            else: attrs
 
         payload =
           case {idx, photo} do

@@ -11,14 +11,27 @@ defmodule Genswarms.Telegram.Delivery.Core do
     base = %{
       chat_id: ConversationId.chat_id(cid),
       text: Format.to_html(text),
-      parse_mode: "HTML",
-      disable_web_page_preview: true
+      parse_mode: "HTML"
     }
 
     base
+    |> put_link_preview(attrs)
     |> maybe_put_thread(cid)
     |> maybe_put(:reply_parameters, reply_parameters(attrs))
     |> maybe_put(:reply_markup, reply_markup_from_attrs(attrs))
+  end
+
+  # Previews stay OFF unless the caller asks for them — the default every send
+  # has always had, and the right one for an agent that quotes a URL mid-thread.
+  # An explicit `link_preview_options` (Bot API 7.0, which deprecated
+  # `disable_web_page_preview`) wins and the legacy flag is then omitted, so the
+  # two never travel together. Same option, same name and same shape that
+  # `build_edit_message_text/1` already accepts.
+  defp put_link_preview(payload, attrs) do
+    case optional_map(option(attrs, :link_preview_options), :link_preview_options) do
+      nil -> Map.put(payload, :disable_web_page_preview, true)
+      options -> Map.put(payload, :link_preview_options, options)
+    end
   end
 
   def build_plain_message(%{conversation_id: cid, text: text} = attrs) do
