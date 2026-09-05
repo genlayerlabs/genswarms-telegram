@@ -80,7 +80,7 @@ defmodule Genswarms.Telegram.Client.Curl do
   defp cleanup_temp_files(config_path, body_path) do
     File.rm(config_path)
     File.rm(body_path)
-    File.rm(Path.dirname(config_path))
+    File.rmdir(Path.dirname(config_path))
     :ok
   end
 
