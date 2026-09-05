@@ -105,8 +105,39 @@ defmodule Genswarms.Telegram.Objects.IngressBackpressureTest do
     assert new_state.poll_failures >= 1
     # the poll was re-armed (schedule_poll → Process.send_after(self(), :poll, _))
     assert_receive :poll, 5_000
-    # a crashed batch must not advance the committed offset
-    assert FileStore.read_offset(new_state.bot_ref) == 0
+
+    # THE CRASHED UPDATE IS SKIPPED AND THE OFFSET ADVANCES PAST IT.
+    #
+    # This assertion used to require the offset to stay put, on the reasoning
+    # that a crashed batch should be retried. In production that reasoning cost
+    # a ten-hour, fleet-wide outage: an update whose handling exits `:noproc`
+    # exits again on every redelivery, so "retry" means the same update crashes
+    # every ~48s forever while every later message stays queued behind it
+    # (763 consecutive crashes, one group's message replayed 150 times in two
+    # hours, 31 groups reduced to 1).
+    #
+    # Dropping one update loudly is strictly better than never delivering any
+    # update again — and `poll_failures` above still rises, so the fault stays
+    # visible to the host through `notify_health_sink/1` rather than being
+    # silently absorbed.
+    assert FileStore.read_offset(new_state.bot_ref) == 501
+  end
+
+  test "one crashing update does not block the updates behind it", %{fake: fake} do
+    state = ingress(fake, ExitingRuntime, %{poll_enabled: true})
+
+    # THE PRODUCTION SHAPE: a batch where an early update crashes. Every later
+    # update in the same batch must still be committed, so the queue keeps
+    # moving instead of the whole batch being refetched and re-crashed forever.
+    updates = [text_update(500, 500), text_update(501, 501), text_update(502, 502)]
+
+    new_state =
+      state_of(Ingress.handle_info({:telegram_poll_result, {:ok, updates, 503}}, state))
+
+    assert FileStore.read_offset(new_state.bot_ref) == 503
+    # still counted, so the host's health sink can see something went wrong
+    assert new_state.poll_failures >= 1
+    assert_receive :poll, 5_000
   end
 
   test "caps new sessions per poll; the rest stay queued in Telegram (offset stops)", %{

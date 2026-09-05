@@ -19,6 +19,8 @@
   raises rather than being silently dropped. Applied to every chunk of a
   chunked message, since chunking is the transport's own detail and Telegram
   previews at most the first link of each message it actually sends.
+- Curl transport removes its private temporary directory after cleaning up the
+  request files, instead of leaving one empty directory per request.
 
 ## 0.6.5 - 2026-08-21
 
