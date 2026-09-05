@@ -1,6 +1,9 @@
 # Changelog
 
-## 0.6.6 - Unreleased
+## 0.6.6 - 2026-09-05
+
+- Ingress: skip a crashing update and advance the polling offset so later
+  updates keep flowing; retain the failure count for observability.
 
 - Sender/Delivery: `link_preview_options` is now honoured on the SEND path, so
   a link preview is a per-message decision instead of a transport-wide one.
