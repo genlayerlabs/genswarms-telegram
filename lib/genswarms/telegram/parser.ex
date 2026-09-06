@@ -84,11 +84,24 @@ defmodule Genswarms.Telegram.Parser do
       }
       |> maybe_put(:replied_to, replied_to(message))
       |> maybe_put(:photo, photo_file_id(message))
+      |> maybe_put(:voice, voice_metadata(message))
+      |> maybe_put(:topic_event, topic_event(message))
 
     {:ok, maybe_pending_message_ids(event, update)}
   end
 
   defp parse_message(_update, _message, _source), do: :ignore
+
+  # Preserve metadata only. Admission, downloads, transcription and session
+  # lifecycle policy belong to the host, not the generic Telegram parser.
+  defp voice_metadata(%{"voice" => %{"file_id" => id} = voice}) when is_binary(id),
+    do: Map.take(voice, ["file_id", "file_unique_id", "duration", "mime_type", "file_size"])
+
+  defp voice_metadata(_), do: nil
+
+  defp topic_event(%{"forum_topic_closed" => data}) when is_map(data), do: :closed
+  defp topic_event(%{"forum_topic_reopened" => data}) when is_map(data), do: :reopened
+  defp topic_event(_), do: nil
 
   # Host-generated `inject_update` batches may represent several original
   # Telegram messages as one synthetic transport event. Preserve their real

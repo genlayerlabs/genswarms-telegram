@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Parser: retain bounded voice-file metadata and topic close/reopen service
+  events for host-owned transcription and session lifecycle handling.
+
 ## 0.6.6 - 2026-09-05
 
 - Ingress: skip a crashing update and advance the polling offset so later

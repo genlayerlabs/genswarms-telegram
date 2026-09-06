@@ -319,3 +319,11 @@ mix test
 
 Optional live Telegram smoke tests should use separate credentials and should
 not be required in regular CI.
+
+### Host-owned voice and topic lifecycle
+
+Parser events optionally include `voice` (Telegram file ID, duration, MIME type
+and size) and `topic_event: :closed | :reopened`. They remain non-text events;
+the parser does not download files, transcribe audio or grant access. Hosts must
+validate the Telegram user and conversation before acting on this metadata.
+The Bot API does not provide a corresponding documented topic-deleted event.
