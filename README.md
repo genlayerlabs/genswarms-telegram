@@ -53,10 +53,9 @@ used. Consumers that do not want dynamic GenSwarms spawning can inject their own
 - `Genswarms.Telegram.Store.File` and `Context.MemoryMd` — minimal local
   adapters for bot transport state and optional durable per-conversation
   `MEMORY.md`.
-- `priv/reply.sh` — agent reply helper using `GENSWARMS_TELEGRAM_CONVERSATION_ID`
-  and `GENSWARMS_TELEGRAM_SENDER_OBJECT`. The helper does not include a Telegram
-  target in the payload; the sender must resolve the target from the caller's bound
-  slot identity.
+- `priv/reply.sh` — agent reply helper using `GENSWARMS_TELEGRAM_SENDER_OBJECT`.
+  The helper does not include a Telegram target in the payload; the sender must
+  resolve the target from the caller's bound slot identity.
 
 ## What Hosts Provide
 
@@ -72,7 +71,11 @@ default runtime uses a bounded opaque slot pool; if a slot is reused it unbinds
 the previous conversation before binding the new one. GenSwarms object binding is
 serialized with an object-state barrier before user text is delivered. Production
 systems can replace the runtime when they need a different persistence, spawn, or
-eviction policy.
+eviction policy. Set `session_opts.inject_conversation_env: false` to omit the raw
+conversation ID from `session.env` and bwrap, Docker, or local backend environments;
+slot binding continues to use the host-side ID. The option defaults to `true`.
+Hosts seeking an identity-free agent-visible workspace path must also set
+`workspace_by: :slot` (or use a pattern without `{conversation_id}`).
 
 ## Defaults
 
@@ -81,7 +84,8 @@ eviction policy.
 - Swarmidx ref: `swarmidx:genlayerlabs/genswarms-telegram@0.6.3`.
 - Sender object: `:telegram_sender`
 - Ingress object: `:telegram_ingress`
-- Agent conversation env: `GENSWARMS_TELEGRAM_CONVERSATION_ID`
+- Agent conversation env: `GENSWARMS_TELEGRAM_CONVERSATION_ID`, injected by
+  default; disable with `session_opts.inject_conversation_env: false`.
 - Reply helper sender env: `GENSWARMS_TELEGRAM_SENDER_OBJECT`
 - Linux state dir: `${XDG_STATE_HOME:-$HOME/.local/state}/genswarms/telegram`
 - Workspace root: `${TMPDIR:-/tmp}/genswarms-telegram`
