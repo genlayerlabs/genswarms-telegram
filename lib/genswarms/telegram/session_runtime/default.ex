@@ -22,12 +22,18 @@ defmodule Genswarms.Telegram.SessionRuntime.Default do
     if Map.get(opts, :wipe_workspace_on_ensure, false), do: File.rm_rf(workspace)
     File.mkdir_p!(workspace)
 
+    extra_env = Map.get(opts, :extra_env, %{})
+
     env =
-      opts
-      |> Map.get(:extra_env, %{})
-      |> Map.merge(%{
-        Map.get(opts, :conversation_env, "GENSWARMS_TELEGRAM_CONVERSATION_ID") => conversation_id
-      })
+      if Map.get(opts, :inject_conversation_env, true) == false do
+        extra_env
+      else
+        Map.put(
+          extra_env,
+          Map.get(opts, :conversation_env, "GENSWARMS_TELEGRAM_CONVERSATION_ID"),
+          conversation_id
+        )
+      end
 
     session = %{
       slot: slot,

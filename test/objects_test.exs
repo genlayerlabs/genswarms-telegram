@@ -3,6 +3,7 @@ defmodule Genswarms.Telegram.ObjectsTest do
 
   alias Genswarms.Telegram.Client.Fake
   alias Genswarms.Telegram.Objects.{Ingress, Sender}
+  alias Genswarms.Telegram.SessionRuntime.Default, as: DefaultRuntime
 
   setup do
     dir = Path.join(System.tmp_dir!(), "gst-objects-#{System.unique_integer([:positive])}")
@@ -14,7 +15,7 @@ defmodule Genswarms.Telegram.ObjectsTest do
     end)
 
     {:ok, fake} = Fake.start_link()
-    {:ok, fake: fake}
+    {:ok, fake: fake, dir: dir}
   end
 
   test "sender binds slots, forces bound cid, and rejects unbound agent-like origins", %{
@@ -776,6 +777,56 @@ defmodule Genswarms.Telegram.ObjectsTest do
     assert Jason.decode!(body)["routed"] == true
     assert_receive {:bound, %{slot: :telegram_agent_0}, "tg:123:0", [:telegram_sender]}
     assert_receive {:delivered, %{conversation_id: "tg:123:0"}, text}
+    assert text =~ "hello"
+  end
+
+  test "identity-free default sessions still bind host identity before delivery",
+       %{fake: fake, dir: dir} do
+    parent = self()
+
+    {:ok, state} =
+      Ingress.init(%{
+        inject_sources: [:test],
+        bot_token: "token",
+        client: Fake,
+        client_opts: [fake: fake],
+        session_runtime: DefaultRuntime,
+        session_opts: %{
+          workspace_root: Path.join(dir, "identity-free-workspaces"),
+          inject_conversation_env: false,
+          extra_env: %{"STATIC" => "1"},
+          bind: fn session, conversation_id, sinks ->
+            send(parent, {:bound, session, conversation_id, sinks})
+            :ok
+          end,
+          deliver: fn session, text ->
+            send(parent, {:delivered, session, text})
+            :ok
+          end
+        },
+        binding_sinks: [:telegram_sender],
+        bot_username: nil
+      })
+
+    update = %{
+      "update_id" => 7,
+      "message" => %{"chat" => %{"id" => 123}, "text" => "hello"}
+    }
+
+    {:reply, body, _state} =
+      Ingress.handle_message(:test, %{"action" => "inject_update", "update" => update}, state)
+
+    assert Jason.decode!(body)["routed"] == true
+    assert_receive first_runtime_event
+
+    assert {:bound, %{env: %{"STATIC" => "1"}}, "tg:123:0", [:telegram_sender]} =
+             first_runtime_event
+
+    assert_receive second_runtime_event
+
+    assert {:delivered, %{conversation_id: "tg:123:0", env: %{"STATIC" => "1"}}, text} =
+             second_runtime_event
+
     assert text =~ "hello"
   end
 

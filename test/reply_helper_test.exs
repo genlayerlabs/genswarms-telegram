@@ -32,12 +32,16 @@ defmodule Genswarms.Telegram.ReplyHelperTest do
       {"SWARM_MSG_ARGS", args_path},
       {"SWARM_MSG_PAYLOAD", payload_path},
       {"REPLY_INPUT", input_path},
-      {"GENSWARMS_TELEGRAM_CONVERSATION_ID", "tg:1:0"},
       {"GENSWARMS_TELEGRAM_SENDER_OBJECT", "telegram_sender"}
     ]
 
     assert {_out, 0} =
-             System.cmd("sh", ["-c", "sh priv/reply.sh --to 123 -f - < \"$REPLY_INPUT\""],
+             System.cmd(
+               "sh",
+               [
+                 "-c",
+                 "unset GENSWARMS_TELEGRAM_CONVERSATION_ID; sh priv/reply.sh --to 123 -f - < \"$REPLY_INPUT\""
+               ],
                cd: File.cwd!(),
                env: env
              )

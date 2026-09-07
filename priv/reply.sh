@@ -5,13 +5,7 @@ usage() {
   printf '%s\n' 'usage: reply [--to MESSAGE_ID] MESSAGE | reply [--to MESSAGE_ID] -f -' >&2
 }
 
-cid="${GENSWARMS_TELEGRAM_CONVERSATION_ID:-}"
 sender="${GENSWARMS_TELEGRAM_SENDER_OBJECT:-telegram_sender}"
-
-if [ -z "$cid" ]; then
-  printf '%s\n' 'reply: missing GENSWARMS_TELEGRAM_CONVERSATION_ID' >&2
-  exit 65
-fi
 
 to=""
 if [ "${1:-}" = "--to" ]; then
