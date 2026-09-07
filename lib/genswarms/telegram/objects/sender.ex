@@ -213,6 +213,40 @@ defmodule Genswarms.Telegram.Objects.Sender do
     end
   end
 
+  @doc """
+  Deliver a completed turn with immutable, host-issued Telegram context.
+
+  This native callback is not an action and must only be invoked by the host
+  runtime. It never changes slot bindings or decodes the completion as an action.
+  The context must contain exactly `:conversation_id` and
+  `:reply_to_message_id` (a positive integer, or nil for an unthreaded turn).
+  """
+  def handle_agent_reply(
+        from,
+        text,
+        %{conversation_id: cid, reply_to_message_id: parent} = context,
+        state
+      )
+      when (is_atom(from) or is_binary(from)) and is_binary(text) and
+             map_size(context) == 2 and (is_nil(parent) or (is_integer(parent) and parent > 0)) do
+    msg = %{"conversation_id" => cid, "text" => text, "reply_to_message_id" => parent}
+
+    authorized? =
+      case caller_scope(from, state) do
+        %{kind: :unbound_slot} -> agent_group_enabled?(state.agent_surface, :core)
+        _ -> match?({:ok, _}, authorize_action(from, "reply", msg, state))
+      end
+
+    if valid_cid?(cid) and authorized? do
+      {:ok, state} = send_text(from, cid, msg, state, :reply)
+      {:noreply, state}
+    else
+      {:noreply, state}
+    end
+  end
+
+  def handle_agent_reply(_from, _text, _context, state), do: {:noreply, state}
+
   def handle_info(:pump, state) do
     case :queue.out(state.outbox) do
       {:empty, _} ->
@@ -1291,9 +1325,22 @@ defmodule Genswarms.Telegram.Objects.Sender do
   defp error_payload(reason), do: %{ok: false, error: inspect(reason)}
 
   defp send_text(from, msg, state, origin) do
-    with {:ok, cid} <-
-           resolve_message_target(from, msg, state, state.send_sources),
-         {:cont, state} <- prepare_delivery(from, cid, origin, state) do
+    case resolve_message_target(from, msg, state, state.send_sources) do
+      {:ok, cid} ->
+        send_text(from, cid, msg, state, origin)
+
+      {:error, reason} ->
+        # A conversational reply that never resolved to a target is a real
+        # fault (the user is left unanswered) — surface it to the host.
+        if origin in [:reply, :slot_reply],
+          do: _ = maybe_effect(state, :reply_unresolvable, [from, %{origin: origin}])
+
+        {:error, reason, state}
+    end
+  end
+
+  defp send_text(from, cid, msg, state, origin) do
+    with {:cont, state} <- prepare_delivery(from, cid, origin, state) do
       text =
         Adapter.call(state.delivery_effects, :redact_outbound, [
           Map.get(msg, "text", ""),
@@ -1328,15 +1375,8 @@ defmodule Genswarms.Telegram.Objects.Sender do
       end
     else
       {:suppress, cid, state} ->
-        {:ok, hold_reply(from, cid, Map.get(msg, "text", ""), state)}
-
-      {:error, reason} ->
-        # A conversational reply that never resolved to a target is a real
-        # fault (the user is left unanswered) — surface it to the host.
-        if origin in [:reply, :slot_reply],
-          do: _ = maybe_effect(state, :reply_unresolvable, [from, %{origin: origin}])
-
-        {:error, reason, state}
+        parent = validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state)
+        {:ok, hold_reply(from, cid, Map.get(msg, "text", ""), state, parent)}
     end
   end
 
@@ -3549,7 +3589,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
   defp record_own_message(state, from, cid, result) do
     with from when not is_nil(from) <- from,
-         %{kind: :bound_slot, slot: slot} <- caller_scope(from, state),
+         %{kind: :bound_slot, slot: slot, cid: ^cid} <- caller_scope(from, state),
          {:ok, message_id} <- message_id_from_result(result),
          true <- state.own_message_window > 0 do
       entries =
@@ -3639,7 +3679,8 @@ defmodule Genswarms.Telegram.Objects.Sender do
   defp agent_like?(from, state), do: String.starts_with?(from, state.slot_prefix <> "_")
 
   defp prepare_delivery(from, cid, :reply, state) do
-    if agent_slot?(from, state) and Map.get(state.owed, cid, 0) == 0 and
+    if (agent_slot?(from, state) or agent_like?(to_string(from), state)) and
+         Map.get(state.owed, cid, 0) == 0 and
          answered_recently?(cid, state) do
       _ = maybe_effect(state, :reply_suppressed, [cid, %{origin: :reply, from: from}])
       # the resolved cid travels with :suppress — the caller's `with` else
@@ -3666,7 +3707,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
   # message when the window expires (edits don't notify on Telegram, so
   # append-by-edit would deliver the answer silently). Exact replays of the
   # just-delivered text — the original spam case — still die.
-  defp hold_reply(from, cid, text, state) do
+  defp hold_reply(from, cid, text, state, parent \\ nil) do
     text = String.trim(to_string(text))
     cur = Map.get(state.held, cid)
     held_len = if cur, do: cur.texts |> Enum.map(&String.length/1) |> Enum.sum(), else: 0
@@ -3694,8 +3735,10 @@ defmodule Genswarms.Telegram.Objects.Sender do
         state = if cur == nil, do: schedule_held_flush(cid, state), else: state
 
         held =
-          Map.update(state.held, cid, %{texts: [text], from: from}, fn h ->
-            %{h | texts: h.texts ++ [text], from: from}
+          Map.update(state.held, cid, %{texts: [text], from: from, reply_to: parent}, fn h ->
+            # A combined tail may only identify a parent shared by every text.
+            parent = if h.from == from and Map.get(h, :reply_to) == parent, do: parent
+            Map.merge(h, %{texts: h.texts ++ [text], from: from, reply_to: parent})
           end)
 
         %{state | held: held}
@@ -3723,7 +3766,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
       {nil, _held} ->
         state
 
-      {%{texts: texts, from: from}, held} ->
+      {%{texts: texts, from: from} = entry, held} ->
         state = %{state | held: held}
         text = Enum.join(texts, "\n\n")
 
@@ -3743,7 +3786,9 @@ defmodule Genswarms.Telegram.Objects.Sender do
           # (any future error shape) would MatchError and kill the sender: dead
           # slot claims, wiped mailbox (the 2026-07-07 crash-loop signature).
           # A failed flush costs one coalesced tail, never the sender.
-          case do_send_text(cid, text, %{}, state, %{origin: :reply, from: from, coalesced: true}) do
+          msg = %{"reply_to_message_id" => Map.get(entry, :reply_to)}
+
+          case do_send_text(cid, text, msg, state, %{origin: :reply, from: from, coalesced: true}) do
             {:ok, state} -> state |> stamp_reply(cid, :reply) |> stamp_sig(cid, text, :reply)
             _other -> state
           end

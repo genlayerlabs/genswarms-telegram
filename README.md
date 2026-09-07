@@ -74,6 +74,24 @@ serialized with an object-state barrier before user text is delivered. Productio
 systems can replace the runtime when they need a different persistence, spawn, or
 eviction policy.
 
+For delayed agent completions, hosts can call the native sender callback
+`handle_agent_reply(from, text, context, state)` with immutable turn metadata:
+
+```elixir
+%{conversation_id: "tg:-100123:7", reply_to_message_id: 42}
+```
+
+Capture this context when accepting the turn; use `nil` for an unthreaded parent.
+The callback uses the original conversation even after the slot is rebound or
+unbound, preserving reply suppression, redaction, and delivery feedback. It never
+changes the slot binding or grants a rebound slot ownership of the old reply.
+Parents are validated against the original conversation's recent inbound ids;
+unknown parents are omitted. Held replies keep a parent only when every combined
+text shares that parent and sender. Reply surfaces and named-source authorization
+still apply, and malformed contexts are dropped. This callback is host-only:
+never expose it through agent messages or a Router action. Ordinary `reply` JSON
+continues to use the caller's current binding, regardless of payload context.
+
 ## Defaults
 
 - App: `:genswarms_telegram`

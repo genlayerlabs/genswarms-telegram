@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Sender: add the host-only `handle_agent_reply/4` callback for immutable turn
+  context, keeping delayed replies in their original conversation and parent
+  after slot reuse without granting the rebound slot edit authority. The reply
+  clamp, redaction, and logical delivery feedback remain on the shared path.
 - Parser: retain bounded voice-file metadata and topic close/reopen service
   events for host-owned transcription and session lifecycle handling.
 
