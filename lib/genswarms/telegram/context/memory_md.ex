@@ -100,23 +100,15 @@ defmodule Genswarms.Telegram.Context.MemoryMd do
 
   defp read_tail(path, max_bytes) do
     case File.read(path) do
-      {:ok, body} ->
-        if byte_size(body) > max_bytes do
-          binary_part(body, byte_size(body) - max_bytes, max_bytes)
-        else
-          body
-        end
-
-      {:error, _} ->
-        ""
+      {:ok, body} -> tail(body, max_bytes)
+      {:error, _} -> ""
     end
   end
 
   defp trim(path, max_bytes) do
     case File.read(path) do
       {:ok, body} when byte_size(body) > max_bytes ->
-        keep = binary_part(body, byte_size(body) - max_bytes, max_bytes)
-        File.write(path, "# Memory\n\n" <> keep)
+        File.write(path, "# Memory\n\n" <> tail(body, max_bytes))
 
       {:ok, _body} ->
         :ok
@@ -125,6 +117,30 @@ defmodule Genswarms.Telegram.Context.MemoryMd do
         error
     end
   end
+
+  # Keep at most `max_bytes` of the end of `body`, starting on a line boundary
+  # so the kept text is valid UTF-8 and begins with a whole turn. A byte offset
+  # alone can land inside a multi-byte character, and the invalid text would
+  # then be written back and handed to the runtime as context. Falls back to
+  # the next character boundary when the tail holds no line break.
+  defp tail(body, max_bytes) when byte_size(body) <= max_bytes, do: body
+
+  defp tail(body, max_bytes) do
+    keep = binary_part(body, byte_size(body) - max_bytes, max_bytes)
+
+    case :binary.match(keep, "\n") do
+      {pos, 1} when pos + 1 < byte_size(keep) ->
+        keep |> binary_part(pos + 1, byte_size(keep) - pos - 1) |> String.trim_leading("\n")
+
+      _ ->
+        drop_partial_char(keep)
+    end
+  end
+
+  defp drop_partial_char(<<byte, rest::binary>>) when byte in 0x80..0xBF,
+    do: drop_partial_char(rest)
+
+  defp drop_partial_char(binary), do: binary
 
   defp sanitize(text) do
     text

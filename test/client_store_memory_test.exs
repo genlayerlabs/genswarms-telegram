@@ -335,6 +335,30 @@ defmodule Genswarms.Telegram.ClientStoreMemoryTest do
     assert byte_size(MemoryMd.before_turn("bot-trim", cid, "", %{max_bytes: 50})) <= 50
   end
 
+  test "memory md keeps trimmed histories valid UTF-8 and on a line boundary", %{dir: dir} do
+    workspace = Path.join(dir, "memory-utf8-workspace")
+    cid = "tg:utf8:0"
+    assert :ok = MemoryMd.init_session("bot-utf8", cid, %{workspace: workspace})
+
+    # Multi-byte text (2-, 3- and 4-byte sequences) with limits that make a raw
+    # byte cut land inside a character for at least some of the turns.
+    for {turn, max_bytes} <- Enum.zip(1..40, Stream.cycle(61..70)) do
+      opts = %{max_bytes: max_bytes}
+      assert :ok = MemoryMd.after_turn("bot-utf8", cid, :user, "ñandú €#{turn} 🦤 ok", opts)
+
+      body = File.read!(MemoryMd.memory_path("bot-utf8", cid))
+      assert String.valid?(body), "turn #{turn}: file is not valid UTF-8"
+      assert byte_size(body) <= max_bytes + byte_size("# Memory\n\n")
+
+      context = MemoryMd.before_turn("bot-utf8", cid, "", opts)
+      assert String.valid?(context), "turn #{turn}: context is not valid UTF-8"
+      assert byte_size(context) <= max_bytes
+
+      # Whole lines only: a heading from the template or a full turn.
+      assert String.starts_with?(context, ["# ", "## ", "- user: "]), inspect(context)
+    end
+  end
+
   test "noop effect adapters preserve contract defaults" do
     assert DeliveryEffects.Noop.before_send(%{}) == :ok
     assert DeliveryEffects.Noop.after_send(%{}, {:ok, true}) == :ok
