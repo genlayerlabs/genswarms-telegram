@@ -238,7 +238,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
       end
 
     if valid_cid?(cid) and authorized? do
-      {:ok, state} = send_text(from, cid, msg, state, :reply)
+      {:ok, state} = send_text(from, cid, msg, state, :reply, [context])
       {:noreply, state}
     else
       {:noreply, state}
@@ -1339,7 +1339,16 @@ defmodule Genswarms.Telegram.Objects.Sender do
     end
   end
 
-  defp send_text(from, cid, msg, state, origin) do
+  defp send_text(from, cid, msg, state, origin, reply_contexts \\ []) do
+    # Only the native callback supplies these contexts. Model message fields
+    # cannot create them, and the bounded inbound cache cannot invalidate them.
+    meta = %{
+      origin: origin,
+      from: from,
+      mark: Map.get(msg, "mark"),
+      reply_contexts: reply_contexts
+    }
+
     with {:cont, state} <- prepare_delivery(from, cid, origin, state) do
       text =
         Adapter.call(state.delivery_effects, :redact_outbound, [
@@ -1354,21 +1363,12 @@ defmodule Genswarms.Telegram.Objects.Sender do
 
         state =
           state
-          |> record_logical_delivery(cid, %{text: text}, result, %{
-            origin: origin,
-            from: from,
-            text: text,
-            mark: Map.get(msg, "mark")
-          })
+          |> record_logical_delivery(cid, %{text: text}, result, Map.put(meta, :text, text))
           |> stamp_reply(cid, origin)
 
         {:ok, state}
       else
-        case do_send_text(cid, text, msg, state, %{
-               origin: origin,
-               from: from,
-               mark: Map.get(msg, "mark")
-             }) do
+        case do_send_text(cid, text, msg, state, meta) do
           {:ok, state} -> {:ok, state |> stamp_reply(cid, origin) |> stamp_sig(cid, text, origin)}
           other -> other
         end
@@ -1376,7 +1376,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
     else
       {:suppress, cid, state} ->
         parent = validate_reply_tag(cid, Map.get(msg, "reply_to_message_id"), state)
-        {:ok, hold_reply(from, cid, Map.get(msg, "text", ""), state, parent)}
+        {:ok, hold_reply(from, cid, Map.get(msg, "text", ""), state, parent, reply_contexts)}
     end
   end
 
@@ -3707,7 +3707,7 @@ defmodule Genswarms.Telegram.Objects.Sender do
   # message when the window expires (edits don't notify on Telegram, so
   # append-by-edit would deliver the answer silently). Exact replays of the
   # just-delivered text — the original spam case — still die.
-  defp hold_reply(from, cid, text, state, parent \\ nil) do
+  defp hold_reply(from, cid, text, state, parent \\ nil, reply_contexts \\ []) do
     text = String.trim(to_string(text))
     cur = Map.get(state.held, cid)
     held_len = if cur, do: cur.texts |> Enum.map(&String.length/1) |> Enum.sum(), else: 0
@@ -3720,7 +3720,14 @@ defmodule Genswarms.Telegram.Objects.Sender do
         state
 
       cur != nil and text in cur.texts ->
-        state
+        update_in(state.held[cid], fn h ->
+          parent = if h.from == from and Map.get(h, :reply_to) == parent, do: parent
+
+          Map.merge(h, %{
+            reply_to: parent,
+            reply_contexts: Enum.uniq(Map.get(h, :reply_contexts, []) ++ reply_contexts)
+          })
+        end)
 
       cur == nil and map_size(state.held) >= @held_cids_max ->
         state
@@ -3734,11 +3741,24 @@ defmodule Genswarms.Telegram.Objects.Sender do
       true ->
         state = if cur == nil, do: schedule_held_flush(cid, state), else: state
 
+        entry = %{
+          texts: [text],
+          from: from,
+          reply_to: parent,
+          reply_contexts: reply_contexts
+        }
+
         held =
-          Map.update(state.held, cid, %{texts: [text], from: from, reply_to: parent}, fn h ->
+          Map.update(state.held, cid, entry, fn h ->
             # A combined tail may only identify a parent shared by every text.
             parent = if h.from == from and Map.get(h, :reply_to) == parent, do: parent
-            Map.merge(h, %{texts: h.texts ++ [text], from: from, reply_to: parent})
+
+            Map.merge(h, %{
+              texts: h.texts ++ [text],
+              from: from,
+              reply_to: parent,
+              reply_contexts: Enum.uniq(Map.get(h, :reply_contexts, []) ++ reply_contexts)
+            })
           end)
 
         %{state | held: held}
@@ -3788,7 +3808,14 @@ defmodule Genswarms.Telegram.Objects.Sender do
           # A failed flush costs one coalesced tail, never the sender.
           msg = %{"reply_to_message_id" => Map.get(entry, :reply_to)}
 
-          case do_send_text(cid, text, msg, state, %{origin: :reply, from: from, coalesced: true}) do
+          meta = %{
+            origin: :reply,
+            from: from,
+            coalesced: true,
+            reply_contexts: Map.get(entry, :reply_contexts, [])
+          }
+
+          case do_send_text(cid, text, msg, state, meta) do
             {:ok, state} -> state |> stamp_reply(cid, :reply) |> stamp_sig(cid, text, :reply)
             _other -> state
           end

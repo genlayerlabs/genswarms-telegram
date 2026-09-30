@@ -5,6 +5,13 @@ defmodule Genswarms.Telegram.DeliveryEffects do
   Adapters may be configured either as `Module` or `{Module, opts}`. Tuple
   adapters can implement the callback with one extra final `opts` argument; the
   package will prefer that arity when it exists.
+
+  For text replies, `after_delivery` metadata includes `:reply_contexts`, a list
+  of original native `handle_agent_reply/4` contexts (empty for ordinary messages).
+  Held replies retain all distinct contexts of the texts combined in that send.
+  Hosts may acknowledge those turns only when the outcome is successful. These
+  contexts survive cache eviction; `:reply_to_message_id` remains the independently
+  validated Telegram tag and can be nil. Model message fields cannot set contexts.
   """
 
   @callback before_send(map()) :: :ok | {:error, term()}

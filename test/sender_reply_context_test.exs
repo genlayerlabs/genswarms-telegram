@@ -77,6 +77,44 @@ defmodule Genswarms.Telegram.SenderReplyContextTest do
     assert Jason.decode!(body)["error"] == ":unauthorized_message"
   end
 
+  test "evicting an inbound parent keeps the trusted context in delivery feedback", %{
+    state: state
+  } do
+    state = Enum.reduce(11..18, state, &inbound(&2, @original, &1))
+    {:noreply, result} = Sender.handle_agent_reply(@slot, "old answer", @context, state)
+
+    assert [%{payload: payload}] = result.sent
+    refute Map.has_key?(payload, :reply_parameters)
+
+    assert_received {:delivered, %{conversation_id: @original}, %{ok: true},
+                     %{reply_to_message_id: nil, reply_contexts: [@context]}}
+  end
+
+  test "held replies retain their host context after their parent is evicted", %{state: state} do
+    {:noreply, state} = Sender.handle_agent_reply(@slot, "answer", @context, state)
+    {:noreply, state} = Sender.handle_agent_reply(@slot, "held detail", @context, state)
+    # Pruning the bounded conversation cache can outlive an already held reply.
+    state = %{state | inbound: Map.delete(state.inbound, @original)}
+
+    {:noreply, result} = Sender.handle_info({:flush_held, @original}, state)
+    assert [%{payload: %{text: "held detail"} = payload} | _] = result.sent
+    refute Map.has_key?(payload, :reply_parameters)
+
+    assert_received {:delivered, %{text: "held detail"}, %{ok: true},
+                     %{reply_to_message_id: nil, reply_contexts: [@context], coalesced: true}}
+  end
+
+  test "failed native delivery reports its context without claiming success", %{
+    state: state,
+    fake: fake
+  } do
+    Fake.push_response(fake, {:error, {:failed, 400, "Bad Request"}})
+    {:noreply, _result} = Sender.handle_agent_reply(@slot, "answer", @context, state)
+
+    assert_received {:delivered, %{conversation_id: @original}, %{ok: false},
+                     %{reply_contexts: [@context]}}
+  end
+
   test "captured replies survive unbinding and still suppress exact duplicates", %{state: state} do
     state = control(state, %{"action" => "unbind_session", "slot" => @slot})
     {:noreply, state} = Sender.handle_agent_reply(@slot, "old answer", @context, state)
@@ -120,7 +158,51 @@ defmodule Genswarms.Telegram.SenderReplyContextTest do
     refute Map.has_key?(payload, :reply_parameters)
 
     assert_received {:delivered, %{text: "first tail\n\nother tail"}, %{ok: true},
-                     %{reply_to_message_id: nil, coalesced: true}}
+                     %{
+                       reply_to_message_id: nil,
+                       coalesced: true,
+                       reply_contexts: [
+                         @context,
+                         %{conversation_id: @original, reply_to_message_id: 11}
+                       ]
+                     }}
+  end
+
+  test "duplicate held text retains distinct native contexts without a mixed-parent tag", %{
+    state: state
+  } do
+    state = inbound(state, @original, 11)
+    other_context = %{@context | reply_to_message_id: 11}
+    {:noreply, state} = Sender.handle_agent_reply(@slot, "first interim", @context, state)
+    {:noreply, state} = Sender.handle_agent_reply(@slot, "second interim", other_context, state)
+    {:noreply, state} = Sender.handle_agent_reply(@slot, "Done", @context, state)
+    {:noreply, state} = Sender.handle_agent_reply(@slot, "Done", other_context, state)
+    {:noreply, state} = Sender.handle_agent_reply(@slot, "Done", @context, state)
+
+    {:noreply, result} = Sender.handle_info({:flush_held, @original}, state)
+    assert [%{payload: %{text: "Done"} = payload} | _] = result.sent
+    refute Map.has_key?(payload, :reply_parameters)
+
+    assert_received {:delivered, %{text: "Done"}, %{ok: true},
+                     %{reply_contexts: [@context, ^other_context], coalesced: true}}
+  end
+
+  test "native context survives deduplication against ordinary held text", %{state: state} do
+    state = bind(state, @original)
+
+    {:noreply, state} =
+      Sender.handle_message(@slot, %{"action" => "reply", "text" => "interim"}, state)
+
+    {:noreply, state} =
+      Sender.handle_message(@slot, %{"action" => "reply", "text" => "Done"}, state)
+
+    {:noreply, state} = Sender.handle_agent_reply(@slot, "Done", @context, state)
+    {:noreply, result} = Sender.handle_info({:flush_held, @original}, state)
+    assert [%{payload: %{text: "Done"} = payload} | _] = result.sent
+    refute Map.has_key?(payload, :reply_parameters)
+
+    assert_received {:delivered, %{text: "Done"}, %{ok: true},
+                     %{reply_contexts: [@context], coalesced: true}}
   end
 
   test "parent tags are validated only against the captured conversation", %{state: state} do
@@ -182,6 +264,16 @@ defmodule Genswarms.Telegram.SenderReplyContextTest do
       Sender.handle_message(@slot, Map.put(payload, "action", "handle_agent_reply"), state)
 
     assert result.sent == []
+  end
+
+  test "ordinary messages cannot supply trusted delivery contexts", %{state: state} do
+    for forged <- [%{"reply_contexts" => [@context]}, %{reply_contexts: [@context]}] do
+      msg = Map.merge(%{"action" => "reply", "text" => "current answer"}, forged)
+      {:noreply, _result} = Sender.handle_message(@slot, msg, state)
+
+      assert_received {:delivered, %{conversation_id: @successor}, %{ok: true},
+                       %{reply_contexts: []}}
+    end
   end
 
   test "host callback treats JSON-looking completion as text, never an action", %{state: state} do

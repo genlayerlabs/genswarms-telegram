@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Sender: retain native `reply_contexts` in delivery feedback after inbound-cache
+  eviction and held-reply batching, so hosts can acknowledge only completed turns.
 - Sender: add the host-only `handle_agent_reply/4` callback for immutable turn
   context, keeping delayed replies in their original conversation and parent
   after slot reuse without granting the rebound slot edit authority. The reply
